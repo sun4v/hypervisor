@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)main.s	1.8	07/07/17 SMI"
+	.ident	"@(#)main.s	1.9	07/09/27 SMI"
 
 /*
  * Niagara2 startup code
@@ -459,7 +459,7 @@
 	HVCALL(l2_flush_cache)
 
 #ifdef RESETCONFIG_ENABLEHWSCRUBBERS
-	PRINT_NOTRAP("Enable L2 and DRAM HW scrubbers\r\n");
+	PRINT_NOTRAP("Enable DRAM HW scrubbers\r\n");
 	HVCALL(enable_hw_scrubbers)
 #endif
 
@@ -1405,48 +1405,7 @@ bus_failed:
 	stx	reg2, [dram_base + reg1]				;\
     1: 	.poplocals
 
-#define	L2_SCRUB_ENABLE(l2cr_base, bank, reg1, reg2)			\
-	.pushlocals							;\
-	SKIP_DISABLED_L2_BANK(bank, reg1, reg2, 1f)			;\
-	set	bank << L2_BANK_SHIFT, reg1				;\
-	ldx	[l2cr_base + reg1], reg2				;\
-	btst	L2_SCRUBENABLE, reg2					;\
-	bnz,pt	%xcc, 1f						;\
-	nop								;\
-	set	L2_SCRUBINTERVAL_MASK, reg1				;\
-	andn	reg2, reg1, reg2					;\
-	set	DEFAULT_L2_SCRUBINTERVAL, reg1				;\
-	sllx	reg1, L2_SCRUBINTERVAL_SHIFT, reg1			;\
-	or	reg1, L2_SCRUBENABLE, reg1				;\
-	or	reg2, reg1, reg2					;\
-	set	bank << L2_BANK_SHIFT, reg1				;\
-	stx	reg2, [l2cr_base + reg1]				;\
-    1: 	.poplocals
-
-	/*
-	 * Ensure all zero'd memory is flushed from the l2$
-	 */
-	mov	%g5, %o0
-	mov	%g6, %o1
-	HVCALL(l2_flush_cache)
-	PRINT_NOTRAP("Enable Hardware Scrubber\r\n");
-	mov	%o1, %g6
-	mov	%o0, %g5
-
 	ENTRY(enable_hw_scrubbers)
-	/*
-	 * Enable the l2$ scrubber for each of the enabled l2$ banks
-	 */
-	setx	L2_CONTROL_REG, %g2, %g1
-	L2_SCRUB_ENABLE(%g1, /* bank */ 0, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 1, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 2, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 3, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 4, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 5, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 6, %g2, %g3)
-	L2_SCRUB_ENABLE(%g1, /* bank */ 7, %g2, %g3)
-
 	/*
 	 * Enable the Niagara memory scrubber for each enabled DRAM
 	 * bank

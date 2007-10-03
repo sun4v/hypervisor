@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)reset.s	1.2	07/09/20 SMI"
+#pragma ident	"@(#)reset.s	1.3	07/09/27 SMI"
 
 /*
  * dumbreset - a minimal Niagara reset sequence with the same
@@ -266,17 +266,6 @@ bypass_mcu_init:
 	mov     1, %g5
 	stxa    %g5, [%g4]ASI_CMP_CHIP
 	
-	setx	L2_CONTROL_REG, %g2, %g1	! enable L2$ and scrubbing
-	setx	L2_SCRUBENABLE | (1<<L2_SCRUBINTERVAL_SHIFT), %g3, %g2
-	stx	%g2, [%g1]
-	stx	%g2, [%g1 + 0x040]
-	stx	%g2, [%g1 + 0x080]
-	stx     %g2, [%g1 + 0x0c0]
-	stx     %g2, [%g1 + 0x100]
-	stx     %g2, [%g1 + 0x140]
-	stx     %g2, [%g1 + 0x180]
-	stx     %g2, [%g1 + 0x1c0]
-
 	setx	MEMBASE, %g4, %g1 ! Mem base XXX
 	setx	MEMSIZE, %g4, %g2 ! Mem size XXX
 	setx	HVPD, %g4, %g3	! Partition Description
