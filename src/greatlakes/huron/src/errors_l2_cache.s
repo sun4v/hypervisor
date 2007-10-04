@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_l2_cache.s	1.12	07/09/18 SMI"
+#pragma ident	"@(#)errors_l2_cache.s	1.13	07/10/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
@@ -154,6 +154,26 @@
 	! skip banks which are disabled.  causes hang.
 	SKIP_DISABLED_L2_BANK(%g3, %g4, %g5, .dump_l2c_no_l2_error)
 
+	! If NotData error just read/clear the L2 ND ESRs, leaving
+	! the others untouched.
+	add	%g1, ERR_DIAG_BUF_L2_CACHE_ND, %g2
+	mulx	%g3, ERR_DIAG_BUF_L2_CACHE_ND_INCR, %g5
+	add	%g2, %g5, %g2
+	setx	L2_ERROR_NOTDATA_REG, %g4, %g5
+	sllx	%g3, L2_BANK_SHIFT, %g4
+	or	%g5, %g4, %g4
+	ldx	[%g4], %g5
+	brz	%g5, .skip_l2_nd_esrs
+	nop
+	stx	%g5, [%g4]		! clear NDESR	RW1C
+	stx	%g0, [%g4]		! clear NDESR	RW
+	stx	%g5, [%g2]		! store in diag buf
+
+	ba	.dump_l2c_no_l2_error	! skip other ESRs
+	stx	%g3, [%g1 + ERR_DIAG_L2_BANK]
+
+.skip_l2_nd_esrs:
+
 	setx	L2_ERROR_STATUS_REG, %g4, %g5
 	sllx	%g3, L2_BANK_SHIFT, %g2
 	or	%g5, %g2, %g2
@@ -246,9 +266,12 @@
 	GET_ERR_DIAG_DATA_BUF(%g3, %g2)
 	ldx	[%g3 + ERR_DIAG_L2_PA], %g4
 	! %g4	PA
-	add     %g3, ERR_DIAG_BUF_DIAG_DATA, %g3	! err_diag_buf.err_diag_data
-	add	%g3, ERR_DIAG_DATA_L2_CACHE, %g3	! err_diag_buf.err_diag_data.err_l2_cache
-	add	%g3, ERR_DRAM_CONTENTS, %g2		! err_diag_buf.err_diag_data.err_l2_cache.dram_contents
+	add     %g3, ERR_DIAG_BUF_DIAG_DATA, %g3
+	! %g3 - err_diag_buf.err_diag_data
+	add	%g3, ERR_DIAG_DATA_L2_CACHE, %g3
+	! %g3 - err_diag_buf.err_diag_data.err_l2_cache
+	add	%g3, ERR_DRAM_CONTENTS, %g2
+	! %g3 - err_diag_buf.err_diag_data.err_l2_cache.dram_contents
 	add	%g4, L2_LINE_SIZE, %g4		! align PA
 	andn	%g4, L2_LINE_SIZE, %g4		!  ...
 	ldx	[%g4 + (0 * SIZEOF_UI64)], %g3
@@ -276,32 +299,63 @@
 
 	! fallthrough
 
-dump_l2_cache_dram_esrs:
-
 	! check whether this error requires the DRAM data to be dumped/cleared
 	GET_ERR_TABLE_ENTRY(%g1, %g2)
 	ld	[%g1 + ERR_FLAGS], %g1
 	set	ERR_NO_DRAM_DUMP, %g2
 	btst	%g1, %g2
-	bnz,pn	%xcc, dump_l2_cache_exit
+	bnz,pn	%xcc, .dump_l2_cache_exit
 	nop
+
+	HVCALL(dump_dram_esrs)
+
+.dump_l2_cache_exit:
+
+	GET_ERR_SUN4V_RPRT_BUF(%g2, %g3)
+	brz,pn	%g2, .dump_l2c_no_l2_guest_report
+	GET_ERR_DIAG_DATA_BUF(%g4, %g5)
+	brz,pn	%g4, .dump_l2c_no_l2_guest_report
+	nop
+	ldx	[%g4 + ERR_DIAG_L2_PA], %g5
+	VCPU_STRUCT(%g1)
+	CPU_ERR_PA_TO_RA(%g1, %g5, %g4, %g3, %g6)
+	stx	%g4, [%g2 + ERR_SUN4V_RPRT_ADDR]
+.dump_l2c_no_l2_guest_report:
+	! all done
+	GET_ERR_RETURN_ADDR(%g7, %g2)
+
+	HVRET
+
+	SET_SIZE(dump_l2_cache)
+
+
+	/*
+	 * Dump Dram ESRs
+	 *
+	 * Note: Erratum 116 requires FBD Syndrome register to be written
+	 *	 twice to clear the value. Recommended to also do this for
+	 * 	 all DRAM ESRs.
+	 *
+	 * On return: %g1 - DIAG_BUF ptr
+	 */
+	ENTRY(dump_dram_esrs)
 
 	GET_ERR_DIAG_DATA_BUF(%g1, %g2)
 	! DIAG_BUF in %g1
 
 	/*
-	 * Store DRAM ESR/EAR/ND for the bank in error into the DIAG_BUF
+	 * Store DRAM ESR/EAR/Retry for the bank in error into the DIAG_BUF
 	 */
 	set	(NO_DRAM_BANKS - 1), %g3
-.dump_l2c_dram_banks:
+.dump_dram_banks:
 	! skip banks which are disabled.  causes hang.
-	SKIP_DISABLED_DRAM_BANK(%g3, %g4, %g5, .dump_l2c_no_dram_error)
+	SKIP_DISABLED_DRAM_BANK(%g3, %g4, %g5, .dump_no_dram_error)
 
 	setx	DRAM_ESR_BASE, %g4, %g5
 	sllx	%g3, DRAM_BANK_SHIFT, %g2
 	or	%g5, %g2, %g2
 	ldx	[%g2], %g4
-	brz,pt	%g4, .dump_l2c_no_dram_error	! no error on this bank
+	brz,pt	%g4, .dump_no_dram_error	! no error on this bank
 	nop
 
 	stx	%g4, [%g2]	! clear DRAM ESR 	RW1C
@@ -369,29 +423,13 @@ dump_l2_cache_dram_esrs:
 	stx	%g0, [%g4]
 	stx	%g5, [%g2]
 
-.dump_l2c_no_dram_error:
+.dump_no_dram_error:
 	! next bank
-	brgz,pt	%g3, .dump_l2c_dram_banks
+	brgz,pt	%g3, .dump_dram_banks
 	dec	%g3
 
-dump_l2_cache_exit:
-
-	GET_ERR_SUN4V_RPRT_BUF(%g2, %g3)
-	brz,pn	%g2, .dump_l2c_no_l2_guest_report
-	GET_ERR_DIAG_DATA_BUF(%g4, %g5)
-	brz,pn	%g4, .dump_l2c_no_l2_guest_report
-	nop
-	ldx	[%g4 + ERR_DIAG_L2_PA], %g5
-	VCPU_STRUCT(%g1)
-	CPU_ERR_PA_TO_RA(%g1, %g5, %g4, %g3, %g6)
-	stx	%g4, [%g2 + ERR_SUN4V_RPRT_ADDR]
-.dump_l2c_no_l2_guest_report:
-	! all done
-	GET_ERR_RETURN_ADDR(%g7, %g2)
-
 	HVRET
-
-	SET_SIZE(dump_l2_cache)
+	SET_SIZE(dump_dram_esrs)
 
 	/*
 	 * Populate a sun4v ereport packet for L2$ errors

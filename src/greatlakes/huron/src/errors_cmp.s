@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_cmp.s	1.4	07/09/11 SMI"
+#pragma ident	"@(#)errors_cmp.s	1.5	07/10/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sun4v/asi.h>
@@ -2359,89 +2359,9 @@ correct_irfc_exit:
 	brgz,pt	%g3, 1b
 	dec	%g3
 
+	HVCALL(dump_dram_esrs)
+
 	! DIAG_BUF in %g1
-
-	/*
-	 * Store DRAM ESR/EAR/ND for the bank in error into the DIAG_BUF
-	 */
-	set	(NO_DRAM_BANKS - 1), %g3
-3:
-	! skip banks which are disabled.  causes hang.
-	SKIP_DISABLED_DRAM_BANK(%g3, %g4, %g5, 4f)
-
-	setx	DRAM_ESR_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g2
-	or	%g5, %g2, %g2
-	ldx	[%g2], %g4
-	brz,pt	%g4, 4f		! no error on this bank
-	nop
-
-	stx	%g4, [%g2]	! clear DRAM ESR 	RW1C
-	stx	%g0, [%g2]	! clear DRAM ESR 	RW
-	add	%g1, ERR_DIAG_BUF_DRAM_ESR, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_ESR_INCR, %g5
-	add	%g2, %g5, %g2
-	stx	%g4, [%g2]
-
-	add	%g1, ERR_DIAG_BUF_DRAM_EAR, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_EAR_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	DRAM_EAR_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g0, [%g4]	! clear DRAM EAR register
-	stx	%g0, [%g4]	! and again for erratum 116
-	stx	%g5, [%g2]
-
-	add	%g1, ERR_DIAG_BUF_DRAM_LOC, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_LOC_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	DRAM_ELR_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g0, [%g4]	! clear DRAM LOC register
-	stx	%g0, [%g4]	! and again for erratum 116
-	stx	%g5, [%g2]
-
-	add	%g1, ERR_DIAG_BUF_DRAM_CTR, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_CTR_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	DRAM_ECR_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g0, [%g4]	! clear DRAM COUNTER register
-	stx	%g0, [%g4]	! and again for erratum 116
-	stx	%g5, [%g2]
-
-	add	%g1, ERR_DIAG_BUF_DRAM_FBD, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_FBD_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	DRAM_FBD_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g0, [%g4]	! clear FBD syndrome register
-	stx	%g0, [%g4]	! and again for erratum 116
-	stx	%g5, [%g2]
-
-	add	%g1, ERR_DIAG_BUF_DRAM_RETRY, %g2
-	mulx	%g3, ERR_DIAG_BUF_DRAM_RETRY_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	DRAM_RETRY_BASE, %g4, %g5
-	sllx	%g3, DRAM_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g0, [%g4]	! clear DRAM error retry register
-	stx	%g0, [%g4]	! and again for erratum 116
-	stx	%g5, [%g2]
-
-4:
-	! next bank
-	brgz,pt	%g3, 3b
-	dec	%g3
 
 	add	%g1, ERR_DIAG_BUF_DIAG_DATA, %g1
 	add	%g1, ERR_DIAG_DATA_TRAP_REGS, %g1
