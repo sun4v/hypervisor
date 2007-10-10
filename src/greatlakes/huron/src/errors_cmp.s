@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_cmp.s	1.5	07/10/03 SMI"
+#pragma ident	"@(#)errors_cmp.s	1.6	07/10/08 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sun4v/asi.h>
@@ -2359,7 +2359,9 @@ correct_irfc_exit:
 	brgz,pt	%g3, 1b
 	dec	%g3
 
+	STORE_ERR_RETURN_ADDR(%g7, %g3, %g4)
 	HVCALL(dump_dram_esrs)
+	GET_ERR_RETURN_ADDR(%g7, %g2)
 
 	! DIAG_BUF in %g1
 
