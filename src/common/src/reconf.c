@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)reconf.c	1.22	07/07/19 SMI"
+#pragma ident	"@(#)reconf.c	1.23	07/10/15 SMI"
 
 #include <stdarg.h>
 #include <sys/htypes.h>
@@ -914,7 +914,7 @@ static sp_ldc_sram_ptrs_t sp_ldc_sram_data[MAX_SP_LDC_CHANNELS] = {
 	{0xfff0e04343, 0xfff0e00d20, 4, 0xfff0e04384, 0xfff0e02260, 4},
 	{0xfff0e04348, 0xfff0e00e60, 4, 0xfff0e04389, 0xfff0e023a0, 4},
 	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
+	{0xfff0e04352, 0xfff0e010e0, 4, 0xfff0e04393, 0xfff0e02620, 4},
 	{0xfff0e04357, 0xfff0e01220, 4, 0xfff0e04398, 0xfff0e02760, 4},
 	{0xfff0e0435c, 0xfff0e01360, 4, 0xfff0e0439d, 0xfff0e028a0, 4},
 	{0, 0, 0, 0, 0, 0}
