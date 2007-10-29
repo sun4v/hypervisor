@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)mmu.s	1.6	07/07/11 SMI"
+	.ident	"@(#)mmu.s	1.7	07/10/25 SMI"
 
 /*
  * Niagara2 MMU code
@@ -680,6 +680,8 @@
 	ENTRY_NP(dmmu_err)
 	mov	MMU_SFAR, %g2
 	ldxa	[%g2]ASI_DMMU, %g2
+	sllx	%g2, 64 - NVABITS, %g2
+	srax	%g2, 64 - NVABITS, %g2
 	mov	MMU_TAG_ACCESS, %g3
 	ldxa	[%g3]ASI_DMMU, %g3
 	set	(NCTXS - 1), %g4
