@@ -49,7 +49,7 @@
 #ifndef _PIU_PIU_H
 #define	_PIU_PIU_H
 
-#pragma ident	"@(#)piu.h	1.3	07/07/17 SMI"
+#pragma ident	"@(#)piu.h	1.4	07/10/18 SMI"
 
 
 #ifdef __cplusplus
@@ -64,6 +64,8 @@ extern "C" {
 #define	PIU_DEVINO_MASK		(NPIUDEVINO - 1)
 #define	PIU_DEVINO_SHIFT	6
 
+#define	NPIUINTRS		40
+#define	PIUINTRBASE		20
 
 #define	DMU_ADDR_BASE		0x8800000000
 #define	DMU_INTERNAL_INT	62

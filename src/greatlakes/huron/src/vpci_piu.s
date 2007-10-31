@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vpci_piu.s	1.7	07/08/15 SMI"
+	.ident	"@(#)vpci_piu.s	1.8	07/10/18 SMI"
 
 	.file	"vpci_piu.s"
 
@@ -2705,19 +2705,10 @@ skip_piu_leaf_soft_reset:
 	ENTRY(_piu_intr_redistribution)
 	CPU_PUSH(%g7, %g4, %g5, %g6)
 
-	! %g1 - piu cookie ptr
-	lduh	[%g1 + PIU_COOKIE_INOMAX], %g2	! loop counter
-	dec	%g2	! INOMAX - 1
+	set	PIUINTRBASE, %g2	! loop counter
 
 ._piu_intr_redis_loop:
-	cmp	%g2, DMU_INTERNAL_INT
-	be	%xcc, .piu_intr_redis_continue	! DMU errors handle separate
-	nop
-
-	cmp	%g2, PEU_INTERNAL_INT
-	be	%xcc, .piu_intr_redis_continue	! PEU errors handle separate
-	nop
-
+	! %g1 - piu cookie ptr
 	ldx	[%g1 + PIU_COOKIE_INTMAP], %g5
 	REGNO2OFFSET(%g2, %g4)
 	ldx	[%g5 + %g4], %g4
@@ -2746,8 +2737,9 @@ skip_piu_leaf_soft_reset:
 	CPU_POP(%g3, %g4, %g5, %g6)
 
 .piu_intr_redis_continue:
-	deccc	%g2
-	bgeu,pt	 %xcc, ._piu_intr_redis_loop
+	inc	%g2
+	cmp	%g2, PIUINTRBASE + NPIUINTRS
+	blu,pt	 %xcc, ._piu_intr_redis_loop
 	nop
 
 .piu_redis_done:

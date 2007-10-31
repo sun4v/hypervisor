@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_subr.s	1.6	07/08/03 SMI"
+#pragma ident	"@(#)errors_subr.s	1.7	07/10/18 SMI"
 
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
@@ -114,6 +114,13 @@
 	brgz,pt	%g3, 1b
 	dec	%g3
 	
+	/*
+	 * Clear any outstanding AMB errors
+	 */
+	STRAND_PUSH(%g7, %g2, %g3)
+	HVCALL(clear_amb_errors)
+	STRAND_POP(%g7, %g2)
+
 	/*
 	 * Clear DRAM ESR/FBD/ND for all banks
 	 * Set the DRAM ECC/FBR Error Count registers
@@ -675,7 +682,7 @@
 	 */
 	ENTRY(clear_amb_errors)
 
-	STORE_ERR_RETURN_ADDR(%g7, %g1, %g2)
+	STRAND_PUSH(%g7, %g3, %g2)
 
 	set	(NO_DRAM_BANKS - 1), %g3
 0:
@@ -757,7 +764,7 @@
 	brgz,pt	%g3, 0b
 	dec	%g3		! next DRAM bank
 
-	GET_ERR_RETURN_ADDR(%g7, %g2)
+	STRAND_POP(%g7, %g2)
 	HVRET
 
 	SET_SIZE(clear_amb_errors)
@@ -1246,6 +1253,15 @@ cpu_reroute_error_exit:
 	STRAND_PUSH(%g1, %g3, %g4)
 	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(piu_intr_redistribution)
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
+
+	/*
+	 * Migrate PIU err intrs
+	 */
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
+	HVCALL(piu_err_intr_redistribution)
 	STRAND_POP(%g2, %g3)
 	STRAND_POP(%g1, %g3)
 1:

@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vpiu_errs.s	1.2	07/05/15 SMI"
+	.ident	"@(#)vpiu_errs.s	1.3	07/10/18 SMI"
 
 	.file	"vpci_errs.s"
 
@@ -1527,6 +1527,7 @@ clear_peu_err_piu_interrupt:
 	mov	PIU_AID << PIU_DEVINO_SHIFT, %g4
 	or	%g4, PEU_INTERNAL_INT, %g3
 	HVCALL(_piu_err_intr_redistribution)
+	CPU_POP(%g1, %g3, %g4, %g5)
 
 	CPU_POP(%g7, %g3, %g4, %g5)
 	HVRET
