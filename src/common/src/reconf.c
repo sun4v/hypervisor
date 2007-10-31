@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)reconf.c	1.23	07/10/15 SMI"
+#pragma ident	"@(#)reconf.c	1.24	07/10/18 SMI"
 
 #include <stdarg.h>
 #include <sys/htypes.h>
@@ -1855,9 +1855,15 @@ reloc_resource_info(void)
  * Phase 3 - commit phase
  */
 void
-commit_reconfig(void)
+commit_reconfig(bool_t isdelayed, bool_t guest_only)
 {
 	res_info_t *resp;
+
+	/*
+	 * Do nothing for HVctl_op_guest_delayed_reconf
+	 */
+	if (isdelayed && !guest_only)
+		return;
 
 	/*
 	 * NOTE: This is brute force, but for each resource
@@ -1865,6 +1871,34 @@ commit_reconfig(void)
 	 * each op during the parse phase.
 	 * ... another day perhaps.
 	 */
+
+	DBG(c_printf("\ncommit_reconfig: %s %s\n",
+	    isdelayed ? "delayed" : " ", guest_only ? "guest_only" : " "));
+
+	/* For guest_only, just call the guest routines explicitly */
+	if (guest_only) {
+		for (resp = resource_info; resp->namep != NULL; resp++) {
+			if (resp->type == HVctl_res_guest)
+				break;
+		}
+		ASSERT(resp->namep != NULL); /* No HVctl_res_guest found */
+
+		DBG(c_printf("\nphase 3a : guest_only\n"));
+		resp->commit(RESF_Unconfig);
+		resp->commit(RESF_Config);
+		resp->commit(RESF_Rebind);
+		resp->commit(RESF_Modify);
+
+		/*
+		 * Can only accept the new hvmd if we're not in a
+		 * delayed reconfig.
+		 */
+		if (!isdelayed) {
+			DBG(c_printf("\nguest_only: accept_hvmd\n"));
+			accept_hvmd();
+		}
+		return;
+	}
 
 	/* unconfig is done in reverse order, find last resource */
 	for (resp = resource_info; (resp + 1)->namep != NULL; resp++)
@@ -1930,11 +1964,11 @@ init_reconfig_error_reply(hvctl_msg_t *replyp, int code)
  * Hence the inverse priority ordering in the resource management.
  */
 hvctl_status_t
-op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed)
+op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed,
+    bool_t guest_only)
 {
 	hvctl_status_t	status;
 	bin_md_t	*mdp;
-	md_element_t	*mdep;
 	md_element_t	*rootnodep;
 	res_info_t	*resp;
 	uint64_t	guestid, content_version;
@@ -2036,6 +2070,12 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed)
 	/* Phase 1 - prep each resource */
 
 	for (resp = resource_info; resp->namep != NULL; resp++) {
+		if (guest_only && resp->type != HVctl_res_guest) {
+			DBG(c_printf("\nguest only : skipping phase 1: %s\n\n",
+			    resp->namep));
+			continue;
+		}
+
 		DBG(c_printf("\nphase 1 : %s\n\n", resp->namep));
 		resp->prep();
 	}
@@ -2050,6 +2090,12 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed)
 		hvctl_res_error_t fail_code;
 		md_element_t	*failnodep;
 		int		fail_res_id;
+
+		if (guest_only && resp->type != HVctl_res_guest) {
+			DBG(c_printf("\nguest only : skipping phase 2a: %s\n\n",
+			    resp->namep));
+			continue;
+		}
 
 		DBG(c_printf("\nphase 2a : %s\n\n", resp->namep));
 
@@ -2080,6 +2126,12 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed)
 		hvctl_res_error_t fail_code;
 		int fail_res_id;
 
+		if (guest_only && resp->type != HVctl_res_guest) {
+			DBG(c_printf("\nguest only : skipping phase 2b: %s\n\n",
+			    resp->namep));
+			continue;
+		}
+
 		DBG(c_printf("\nphase 2b : %s\n\n", resp->namep));
 
 		status = resp->postparse(&fail_code, &fail_res_id);
@@ -2108,12 +2160,13 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed)
 		    guestid));
 		config.del_reconf_gid = guestid;
 		spinlock_exit(&config.del_reconf_lock);
-	} else {
-		/*
-		 * Phase 3 - commit phase
-		 */
-		commit_reconfig();
 	}
+
+
+	/*
+	 * Phase 3 - commit phase
+	 */
+	commit_reconfig(isdelayed, guest_only);
 
 	return (HVctl_st_ok);
 }

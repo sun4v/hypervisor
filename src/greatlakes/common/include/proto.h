@@ -49,7 +49,7 @@
 #ifndef _PROTO_H
 #define	_PROTO_H
 
-#pragma ident	"@(#)proto.h	1.6	07/05/04 SMI"
+#pragma ident	"@(#)proto.h	1.7	07/10/18 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +67,7 @@ void reloc_devopsvec(devopsvec_t *);
 void *reloc_ptr(void *ptr);
 
 void config_basics(void);
-void commit_reconfig(void);
+void commit_reconfig(bool_t isdelayed, bool_t guest_only);
 
 void c_printf(char *strp, ...);
 void c_putn(uint64_t val, int base);

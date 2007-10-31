@@ -49,7 +49,7 @@
 #ifndef	_HVCTL_H
 #define	_HVCTL_H
 
-#pragma ident	"@(#)hvctl.h	1.8	07/06/06 SMI"
+#pragma ident	"@(#)hvctl.h	1.9	07/10/18 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,7 +66,7 @@ extern "C" {
 #define	HVCTL_STATE_CONNECTED	2
 
 #define	HVCTL_VERSION_MAJOR_NUMBER	1
-#define	HVCTL_VERSION_MINOR_NUMBER	0
+#define	HVCTL_VERSION_MINOR_NUMBER	1
 
 #define	HVCTL_HV_CHALLENGE_K	0xbadbeef20	/* to go away */
 #define	HVCTL_ZEUS_CHALLENGE_K	0x12cafe42a	/* to go away */
@@ -104,6 +104,8 @@ typedef enum {
 	HVctl_op_get_res_stat,	/* Get resource status if supported */
 	HVctl_op_new_res_stat,	/* Aync resource status update if supported */
 	HVctl_op_cancel_reconf,	/* Cancel any pending delayed reconfigure */
+	HVctl_op_guest_only_reconf,	/* Reconfigure just the guest MDs */
+	HVctl_op_guest_only_delayed_reconf,	/* Delayed reconf just guests */
 } hvctl_op_t;
 
 /*
@@ -252,6 +254,8 @@ typedef struct hvctl_hello {
  */
 typedef struct hvctl_challenge {
 	uint64_t	code;
+	uint16_t	major;
+	uint16_t	minor;
 } hvctl_challenge_t;
 
 /*
@@ -462,7 +466,7 @@ typedef struct hvctl_msg {
  */
 void		reloc_resource_info();
 hvctl_status_t	op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp,
-			bool_t isdelayed);
+    bool_t isdelayed, bool_t guest_only);
 hvctl_status_t	op_guest_start(hvctl_msg_t *cmdp, hvctl_msg_t *replyp);
 
 

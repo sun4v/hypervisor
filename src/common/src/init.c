@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)init.c	1.19	07/09/20 SMI"
+#pragma ident	"@(#)init.c	1.20	07/10/18 SMI"
 
 #include  <stdarg.h>
 #include  <sys/htypes.h>
@@ -113,9 +113,10 @@ fake_reconfig(bin_md_t *hvmdp)
 
 	DBGINIT(c_printf("Fake reconfig:\n"));
 #ifdef DEBUG
-	c_printf("returned status 0x%x\n", op_reconfig(&cmd, &reply, false));
+	c_printf("returned status 0x%x\n", op_reconfig(&cmd, &reply, false,
+	    false));
 #else
-	(void) op_reconfig(&cmd, &reply, false);
+	(void) op_reconfig(&cmd, &reply, false, false);
 #endif	/* DEBUG */
 }
 
@@ -659,7 +660,7 @@ c_guest_exit(guest_t *guestp, int reason)
 		}
 		case LDC_SP_ENDPOINT:
 		{
-#if defined(CONFIG_PCIE)  && !defined(DEBUG_LEGION)
+#if defined(CONFIG_PCIE) && !defined(DEBUG_LEGION)
 
 			/* send interrupt notify */
 			ldc_endpoint_t *my_endpt;
@@ -727,7 +728,7 @@ c_guest_exit(guest_t *guestp, int reason)
 	if (config.del_reconf_gid == guestp->guestid) {
 		DBGINIT(c_printf("performing delayed reconfig: guestid=0x%x\n",
 		    guestp->guestid));
-		commit_reconfig();
+		commit_reconfig(false, false);
 		config.del_reconf_gid = INVALID_GID;
 	}
 	spinlock_exit(&config.del_reconf_lock);

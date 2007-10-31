@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)hvcontrol.c	1.12	07/07/10 SMI"
+#pragma ident	"@(#)hvcontrol.c	1.13	07/10/18 SMI"
 
 #include <sys/htypes.h>
 #include <traps.h>
@@ -78,8 +78,7 @@ void reply_cmd(hvctl_msg_t *replyp, hvctl_status_t status);
 void op_start_hello(hvctl_msg_t *rcptp, hvctl_msg_t *replyp);
 void op_start_hello2(hvctl_msg_t *rcptp, hvctl_msg_t *replyp);
 void op_get_configp(hvctl_msg_t *replyp);
-hvctl_status_t op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp,
-    bool_t isdelayed);
+
 hvctl_status_t op_cancel_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp);
 hvctl_status_t op_get_hvconfig(hvctl_msg_t *replyp);
 hvctl_status_t op_guest_start(hvctl_msg_t *cmdp, hvctl_msg_t *replyp);
@@ -198,11 +197,19 @@ hello_cmd:;
 		break;
 	case HVctl_op_reconfigure:
 		DBGHL(c_printf("HVctl_op_reconfigure\n"));
-		status = op_reconfig(rcptp, replyp, false);
+		status = op_reconfig(rcptp, replyp, false, false);
 		break;
 	case HVctl_op_guest_delayed_reconf:
 		DBGHL(c_printf("HVctl_op_guest_delayed_reconf\n"));
-		status = op_reconfig(rcptp, replyp, true);
+		status = op_reconfig(rcptp, replyp, true, false);
+		break;
+	case HVctl_op_guest_only_reconf:
+		DBGHL(c_printf("HVctl_op_guest_reconf\n"));
+		status = op_reconfig(rcptp, replyp, false, true);
+		break;
+	case HVctl_op_guest_only_delayed_reconf:
+		DBGHL(c_printf("HVctl_op_guest_reconf\n"));
+		status = op_reconfig(rcptp, replyp, true, true);
 		break;
 	case HVctl_op_guest_start:
 		DBGHL(c_printf("HVctl_op_guest_start\n"));
@@ -861,6 +868,14 @@ op_start_hello(hvctl_msg_t *rcptp, hvctl_msg_t *replyp)
 
 		replyp->hdr.op = hton16(HVctl_op_challenge);
 		replyp->hdr.status = hton16(HVctl_st_ok);
+		/*
+		 * Need to put major & minor versions in previously
+		 * unused part of reply structure to prevent confusing
+		 * previous versions of the LDom Manager, and to not trample
+		 * on the challenge word.
+		 */
+		replyp->msg.clnge.major = hton64(HVCTL_VERSION_MAJOR_NUMBER);
+		replyp->msg.clnge.minor = hton64(HVCTL_VERSION_MINOR_NUMBER);
 		replyp->msg.clnge.code =
 		    hton64(HVCTL_HV_CHALLENGE_K ^ config.hvctl_rand_num);
 
@@ -1035,6 +1050,9 @@ dump_control_pkt()
 	OP(HVctl_op_guest_start, "Start a guest")
 	OP(HVctl_op_guest_stop, "Stop a guest")
 	OP(HVctl_op_guest_delayed_reconf, "Delayed reconfigure on guest exit")
+	OP(HVctl_op_guest_only_reconf, "Reconfigure guest(s) only")
+	OP(HVctl_op_guest_only_delayed_reconf,
+	    "Delayed reconfigure guest(s) only")
 	OP(HVctl_op_guest_suspend, "Suspend a guest")
 	OP(HVctl_op_guest_resume, "Resume a guest")
 	OP(HVctl_op_guest_panic, "Panic a guest")
