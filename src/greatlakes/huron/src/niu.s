@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)niu.s	1.9	07/09/06 SMI"
+	.ident	"@(#)niu.s	1.10	07/10/24 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -959,6 +959,10 @@ niu_set_state_fail:
  * N.B. this will only work if the guest pa base >= the guest ra base.
  */
 	ENTRY_NP(hcall_niu_rx_lp_set)
+	GUEST_STRUCT(%g4)
+	set	GUEST_NIU_STATEP, %g1
+	ldx	[%g4 + %g1], %g1
+	brz,pn	%g1, herr_noaccess
 	cmp	%o0, NIU_RX_DMA_N_CH
 	bgeu,pn	%xcc, herr_inval
 	cmp	%o1, NIU_RX_LPG_CH_N_REG
@@ -971,8 +975,7 @@ niu_set_state_fail:
 	bnz,pn	%xcc, herr_inval
 	btst	%o2, %g1		! check for natural alignment
 	bnz,pn	%xcc, herr_badalign
-	GUEST_STRUCT(%g1)
-	RA2PA_RANGE_CONV(%g1, %o2, %o3, herr_noraddr, %g3, %g2)
+	RA2PA_RANGE_CONV(%g4, %o2, %o3, herr_noraddr, %g3, %g2)
 
 	! setup reloc register
 	srlx	%g2, NIU_RX_LPG_SHIFT, %g2
@@ -1032,6 +1035,10 @@ niu_set_state_fail:
  * ret2 size (%o2)
  */
 	ENTRY_NP(hcall_niu_rx_lp_get)
+	GUEST_STRUCT(%g1)
+	set	GUEST_NIU_STATEP, %g2
+	ldx	[%g1 + %g2], %g1
+	brz,pn	%g1, herr_noaccess
 	cmp	%o0, NIU_RX_DMA_N_CH
 	bgeu,pn	%xcc, herr_inval
 	cmp	%o1, NIU_RX_LPG_CH_N_REG
@@ -1085,6 +1092,10 @@ niu_set_state_fail:
  * N.B. this will only work if the guest pa base >= the guest ra base.
  */
 	ENTRY_NP(hcall_niu_tx_lp_set)
+	GUEST_STRUCT(%g4)
+	set	GUEST_NIU_STATEP, %g1
+	ldx	[%g4 + %g1], %g1
+	brz,pn	%g1, herr_noaccess
 	cmp	%o0, NIU_TX_DMA_N_CH
 	bgeu,pn	%xcc, herr_inval
 	cmp	%o1, NIU_TX_LPG_CH_N_REG
@@ -1097,8 +1108,7 @@ niu_set_state_fail:
 	bnz,pn	%xcc, herr_inval
 	btst	%o2, %g1		! check for natural alignment
 	bnz,pn	%xcc, herr_badalign
-	GUEST_STRUCT(%g1)
-	RA2PA_RANGE_CONV(%g1, %o2, %o3, herr_noraddr, %g3, %g2)
+	RA2PA_RANGE_CONV(%g4, %o2, %o3, herr_noraddr, %g3, %g2)
 
 	! setup reloc register
 	srlx	%g2, NIU_TX_LPG_SHIFT, %g2
@@ -1158,6 +1168,10 @@ niu_set_state_fail:
  * ret2 size (%o2)
  */
 	ENTRY_NP(hcall_niu_tx_lp_get)
+	GUEST_STRUCT(%g1)
+	set	GUEST_NIU_STATEP, %g2
+	ldx	[%g1 + %g2], %g1
+	brz,pn	%g1, herr_noaccess
 	cmp	%o0, NIU_TX_DMA_N_CH
 	bgeu,pn	%xcc, herr_inval
 	cmp	%o1, NIU_TX_LPG_CH_N_REG
