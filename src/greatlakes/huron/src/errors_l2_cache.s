@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_l2_cache.s	1.13	07/10/03 SMI"
+#pragma ident	"@(#)errors_l2_cache.s	1.14	07/10/18 SMI"
 
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
@@ -168,6 +168,12 @@
 	stx	%g5, [%g4]		! clear NDESR	RW1C
 	stx	%g0, [%g4]		! clear NDESR	RW
 	stx	%g5, [%g2]		! store in diag buf
+
+	! For NotData errors the address is encoded in the L2_ND ESR
+	! and not in a seperate EAR.
+	setx	L2_ND_ESR_ADDR_MASK, %g2, %g4
+	and	%g5, %g4, %g5
+	stx	%g5, [%g1 + ERR_DIAG_L2_PA]
 
 	ba	.dump_l2c_no_l2_error	! skip other ESRs
 	stx	%g3, [%g1 + ERR_DIAG_L2_BANK]
@@ -366,6 +372,12 @@
 
 	stx	%g4, [%g2]	! store DRAM ESR
 
+	! DRAM EAR only valid for DSU and DSC errors
+	setx	(DRAM_ESR_DSC | DRAM_ESR_DSU), %g5, %g6
+	btst	%g6, %g4
+	bz	%xcc, .dump_dram_skip_ear
+	nop
+
 	add	%g1, ERR_DIAG_BUF_DRAM_EAR, %g2
 	mulx	%g3, ERR_DIAG_BUF_DRAM_EAR_INCR, %g5
 	add	%g2, %g5, %g2
@@ -379,6 +391,7 @@
 	stx	%g5, [%g2]
 	stx	%g5, [%g1 + ERR_DIAG_L2_PA]
 
+.dump_dram_skip_ear:
 	add	%g1, ERR_DIAG_BUF_DRAM_LOC, %g2
 	mulx	%g3, ERR_DIAG_BUF_DRAM_LOC_INCR, %g5
 	add	%g2, %g5, %g2
@@ -444,7 +457,7 @@
 	GET_ERR_SUN4V_RPRT_BUF(%g2, %g3)
 	brz,pn	%g2, l2_sun4v_report_exit
 	mov	ERPT_MEM_SIZE, %g5
-	stx	%g5, [%g2 + ERR_SUN4V_RPRT_SZ]
+	st	%g5, [%g2 + ERR_SUN4V_RPRT_SZ]
 l2_sun4v_report_exit:
 	HVRET
 

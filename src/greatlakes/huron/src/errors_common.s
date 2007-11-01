@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_common.s	1.5	07/08/01 SMI"
+#pragma ident	"@(#)errors_common.s	1.6	07/10/18 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sun4v/asi.h>
@@ -1137,7 +1137,7 @@ errors_queue_resumable_erpt_done:
 	and	%g4, %g3, %g4
 	brz,pt	%g4, 1f
 	mov	ERPT_MEM_SIZE, %g4
-	st	%g4, [%g4 + ERR_SUN4V_RPRT_SZ]
+	st	%g4, [%g2 + ERR_SUN4V_RPRT_SZ]
 1:
 
 	add	%g2, ERR_SUN4V_CPU_ERPT, %g2

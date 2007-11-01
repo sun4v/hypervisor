@@ -49,7 +49,7 @@
 #ifndef _NIAGARA2_ERROR_REGS_H
 #define	_NIAGARA2_ERROR_REGS_H
 
-#pragma ident	"@(#)error_regs.h	1.4	07/07/25 SMI"
+#pragma ident	"@(#)error_regs.h	1.5	07/10/18 SMI"
 
 #include <sys/htypes.h>
 
@@ -359,6 +359,8 @@ extern "C" {
 #define	L2_ESR_MEC_SHIFT		62
 #define	L2_ESR_MEU_SHIFT		63
 #define	L2_ESR_ERROR_SHIFT		34	/* first error bit */
+
+#define	L2_ND_ESR_ADDR_MASK		0xfffffffff0
 
 /*
  * L2 ESR error types
