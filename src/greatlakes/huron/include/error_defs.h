@@ -49,7 +49,7 @@
 #ifndef _NIAGARA2_ERROR_DEFS_H
 #define	_NIAGARA2_ERROR_DEFS_H
 
-#pragma ident	"@(#)error_defs.h	1.5	07/08/17 SMI"
+#pragma ident	"@(#)error_defs.h	1.6	07/11/03 SMI"
 
 #include <sys/htypes.h>
 #include <sun4v/errs_defs.h>
@@ -99,9 +99,9 @@ extern "C" {
 #define	ERR_FORCE_SIR		(1 << 15)	/* Force SIR immediately */
 #define	ERR_ABORT_ASM		(1 << 16)	/* Abort from ASM code */
 #define	ERR_ABORT_C		(1 << 17)	/* Abort from C code */
-#define	ERR_NO_DRAM_DUMP	(1 << 18)	/* No dump or clear of DRAM */
-						/* ESRs and data */
-#define	ERR_CLEAR_SOC		(1 << 19)	/* Clear SOC ESRs */
+#define	ERR_NO_DRAM_DUMP	(1 << 18)	/* No dump/clear DRAM data */
+#define	ERR_NO_DRAM_ESR_DUMP	(1 << 19)	/* No dump/clear DRAM ESRs */
+#define	ERR_CLEAR_SOC		(1 << 20)	/* Clear SOC ESRs */
 
 /*
  * error flags for strand->err_flags

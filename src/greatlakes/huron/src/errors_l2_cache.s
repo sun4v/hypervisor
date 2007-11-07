@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)errors_l2_cache.s	1.14	07/10/18 SMI"
+#pragma ident	"@(#)errors_l2_cache.s	1.15	07/11/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
@@ -109,14 +109,8 @@
 	/*
 	 * Check if L2 cache index hashing is enabled
 	 */
-	setx	L2_IDX_HASH_EN_STATUS, %g5, %g4
-	ldx	[%g4], %g4
-	btst	L2_IDX_HASH_EN_STATUS_MASK, %g4
-	bz,pt	%xcc, .correct_lda_no_idx_hashing
-	nop
+	N2_IDX_HASH_ADDR(%g6, %g4, %g5)
 
-	N2_PERFORM_IDX_HASH(%g6, %g2, %g4)	! %g6 = IDX'd flush addr
-.correct_lda_no_idx_hashing:
 	prefetch	[%g6], INVALIDATE_CACHE_LINE
 .correct_lda_next_ear:
 	brgz,pt	%g3, .correct_lda_next_bank
@@ -156,9 +150,6 @@
 
 	! If NotData error just read/clear the L2 ND ESRs, leaving
 	! the others untouched.
-	add	%g1, ERR_DIAG_BUF_L2_CACHE_ND, %g2
-	mulx	%g3, ERR_DIAG_BUF_L2_CACHE_ND_INCR, %g5
-	add	%g2, %g5, %g2
 	setx	L2_ERROR_NOTDATA_REG, %g4, %g5
 	sllx	%g3, L2_BANK_SHIFT, %g4
 	or	%g5, %g4, %g4
@@ -167,13 +158,23 @@
 	nop
 	stx	%g5, [%g4]		! clear NDESR	RW1C
 	stx	%g0, [%g4]		! clear NDESR	RW
-	stx	%g5, [%g2]		! store in diag buf
 
 	! For NotData errors the address is encoded in the L2_ND ESR
 	! and not in a seperate EAR.
 	setx	L2_ND_ESR_ADDR_MASK, %g2, %g4
-	and	%g5, %g4, %g5
-	stx	%g5, [%g1 + ERR_DIAG_L2_PA]
+	and	%g5, %g4, %g4
+	N2_IDX_HASH_ADDR(%g4, %g2, %g6)
+	stx	%g4, [%g1 + ERR_DIAG_L2_PA]
+
+	! Replace hashed PA value in ESR with non-hashed value
+	setx	L2_ND_ESR_ADDR_MASK, %g2, %g6
+	andn	%g5, %g6, %g5
+	or	%g4, %g5, %g5
+
+	add	%g1, ERR_DIAG_BUF_L2_CACHE_ND, %g2
+	mulx	%g3, ERR_DIAG_BUF_L2_CACHE_ND_INCR, %g4
+	add	%g2, %g4, %g2
+	stx	%g5, [%g2]		! store in diag buf
 
 	ba	.dump_l2c_no_l2_error	! skip other ESRs
 	stx	%g3, [%g1 + ERR_DIAG_L2_BANK]
@@ -184,6 +185,9 @@
 	sllx	%g3, L2_BANK_SHIFT, %g2
 	or	%g5, %g2, %g2
 	ldx	[%g2], %g4
+	brz,pt	%g4, .dump_l2c_no_l2_error
+	nop
+
 	setx	(L2_ESR_VEU | L2_ESR_VEC | L2_ESR_DSC | L2_ESR_DSU), %g5, %g6
 	btst	%g6, %g4
 	stx	%g4, [%g2]		! clear ESR	RW1C
@@ -215,20 +219,6 @@
 	bnz	%xcc, .dump_l2c_no_l2_error
 	nop
 
-	add	%g1, ERR_DIAG_BUF_L2_CACHE_ND, %g2
-	mulx	%g3, ERR_DIAG_BUF_L2_CACHE_ND_INCR, %g5
-	add	%g2, %g5, %g2
-	setx	L2_ERROR_NOTDATA_REG, %g4, %g5
-	sllx	%g3, L2_BANK_SHIFT, %g4
-	or	%g5, %g4, %g4
-	ldx	[%g4], %g5
-	stx	%g5, [%g4]		! clear NDESR	RW1C
-	stx	%g0, [%g4]		! clear NDESR	RW
-	stx	%g5, [%g2]
-
-	brnz,a,pt	%g5, 1f		! store bank info in delay slot
-	stx	%g3, [%g1 + ERR_DIAG_L2_BANK]
-1:
 	add	%g1, ERR_DIAG_BUF_L2_CACHE_EAR, %g2
 	mulx	%g3, ERR_DIAG_BUF_L2_CACHE_EAR_INCR, %g5
 	add	%g2, %g5, %g2
@@ -237,11 +227,14 @@
 	or	%g5, %g4, %g4
 	ldx	[%g4], %g5
 	stx	%g0, [%g4]		! clear L2 EAR
+	N2_IDX_HASH_ADDR(%g5, %g3, %g4)
 	stx	%g5, [%g2]
 
 	! %g5	PA
 	brz,pt	%g5, .dump_l2c_no_l2_error
-	stx	%g5, [%g1 + ERR_DIAG_L2_PA]	! delay slot
+	nop
+
+	stx	%g5, [%g1 + ERR_DIAG_L2_PA]
 
 	/*
 	 * get line state
@@ -269,6 +262,13 @@
 	/*
 	 * Dump the contents of DRAM into the diag buf
 	 */
+	GET_ERR_TABLE_ENTRY(%g1, %g2)
+	ld	[%g1 + ERR_FLAGS], %g1
+	set	ERR_NO_DRAM_DUMP, %g2
+	btst	%g1, %g2
+	bnz,pn	%xcc, .dump_l2c_skip_dram
+	nop
+
 	GET_ERR_DIAG_DATA_BUF(%g3, %g2)
 	ldx	[%g3 + ERR_DIAG_L2_PA], %g4
 	! %g4	PA
@@ -296,6 +296,7 @@
         stx     %g3, [%g2 + ERR_DRAM_CONTENTS_INCR * 6]
 	ldx	[%g4 + (7 * SIZEOF_UI64)], %g3
         stx     %g3, [%g2 + ERR_DRAM_CONTENTS_INCR * 7]
+.dump_l2c_skip_dram:
 	GET_ERR_DIAG_DATA_BUF(%g1, %g2)
 .dump_l2c_no_l2_error:
 	! next bank
@@ -305,10 +306,10 @@
 
 	! fallthrough
 
-	! check whether this error requires the DRAM data to be dumped/cleared
+	! check whether this error requires the DRAM ESRs to be dumped/cleared
 	GET_ERR_TABLE_ENTRY(%g1, %g2)
 	ld	[%g1 + ERR_FLAGS], %g1
-	set	ERR_NO_DRAM_DUMP, %g2
+	set	ERR_NO_DRAM_ESR_DUMP, %g2
 	btst	%g1, %g2
 	bnz,pn	%xcc, .dump_l2_cache_exit
 	nop
@@ -388,6 +389,7 @@
 	stx	%g0, [%g4]	! clear DRAM EAR register
 	stx	%g0, [%g4]
 	! %g5	PA
+	N2_IDX_HASH_ADDR(%g5, %g4, %g6)
 	stx	%g5, [%g2]
 	stx	%g5, [%g1 + ERR_DIAG_L2_PA]
 
@@ -816,14 +818,8 @@ l2_sun4v_report_exit:
 	andn	%g4, 0xf, %g4		! force alignment
 	! %g4	PA of DSU error
 
-	setx	L2_IDX_HASH_EN_STATUS, %g3, %g5
-	ldx	[%g5], %g5
-	and	%g5, L2_IDX_HASH_EN_STATUS_MASK, %g5
-	brz,pn	%g5, .verify_dsu_no_idx_hashing		! no index hashing
-	nop
+	N2_IDX_HASH_ADDR(%g4, %g3, %g5)
 
-	N2_PERFORM_IDX_HASH(%g4, %g3, %g5)
-.verify_dsu_no_idx_hashing:
 	! %g4	PA
 	STRAND_STRUCT(%g2)
 	set	STRAND_ERR_FLAG_PROTECTION, %g5

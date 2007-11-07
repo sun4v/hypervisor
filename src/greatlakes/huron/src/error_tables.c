@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)error_tables.c	1.13	07/09/11 SMI"
+#pragma ident	"@(#)error_tables.c	1.14	07/11/03 SMI"
 
 #include <error_defs.h>
 #include <offsets.h>
@@ -213,7 +213,7 @@ error_table_entry_t instruction_access_MMU_errors[] = {
 	{ "ITL2ND", dump_l2_cache, l2_sun4v_report, null_fcn, null_fcn,
 		l2_cache_print,	/* DEBUG print function */
 		ERR_UE|ERR_GL_STORED|ERR_NON_RESUMABLE|
-		    ERR_STRANDS_PARKED|ERR_LAST_IN_TABLE|ERR_NO_DRAM_DUMP,
+		    ERR_STRANDS_PARKED|ERR_LAST_IN_TABLE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_PRECISE_NONRESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE}
@@ -261,7 +261,7 @@ error_table_entry_t data_access_MMU_errors[] = {
 	{ "DTL2ND", dump_l2_cache, l2_sun4v_report, null_fcn, null_fcn,
 		l2_cache_print,	/* DEBUG print function */
 		ERR_UE|ERR_GL_STORED|ERR_NON_RESUMABLE|
-		    ERR_STRANDS_PARKED|ERR_LAST_IN_TABLE|ERR_NO_DRAM_DUMP,
+		    ERR_STRANDS_PARKED|ERR_LAST_IN_TABLE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_PRECISE_NONRESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE}
@@ -474,7 +474,7 @@ error_table_entry_t data_access_errors[] = {
 	{ "DCL2ND", dump_l2_cache, l2_sun4v_report, null_fcn, null_fcn,
 		null_fcn,	/* DEBUG print function */
 		ERR_UE|ERR_GL_STORED|ERR_STRANDS_PARKED|
-		    ERR_NON_RESUMABLE|ERR_NO_DRAM_DUMP,
+		    ERR_NON_RESUMABLE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_PRECISE_NONRESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE},
@@ -556,7 +556,7 @@ error_table_entry_t sw_recoverable_errors[] = {
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE},
 	{ "MAL2ND", dump_l2_cache, null_fcn, null_fcn, null_fcn,
 		null_fcn,	/* DEBUG print function */
-		ERR_UE|ERR_NO_DRAM_DUMP,
+		ERR_UE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_NO_REPORT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_UNDEF,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE},
@@ -574,7 +574,7 @@ error_table_entry_t sw_recoverable_errors[] = {
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE},
 	{ "CWQL2ND", dump_l2_cache, null_fcn, null_fcn, null_fcn,
 		null_fcn,	/* DEBUG print function */
-		ERR_UE|ERR_NO_DRAM_DUMP,
+		ERR_UE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_NO_REPORT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_UNDEF,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE},
@@ -600,7 +600,7 @@ error_table_entry_t sw_recoverable_errors[] = {
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE},
 	{ "L2ND", dump_l2_cache, l2_sun4v_report, null_fcn, null_fcn,
 		null_fcn,	/* DEBUG print function */
-		ERR_UE|ERR_NO_DRAM_DUMP,
+		ERR_UE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_UE_RESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE},
@@ -642,7 +642,7 @@ error_table_entry_t instruction_access_errors[] = {
 	{ "ICL2ND", dump_l2_cache, l2_sun4v_report, null_fcn, null_fcn,
 		null_fcn,	/* DEBUG print function */
 		ERR_UE|ERR_GL_STORED|ERR_STRANDS_PARKED|
-		    ERR_LAST_IN_TABLE|ERR_NON_RESUMABLE|ERR_NO_DRAM_DUMP,
+		    ERR_LAST_IN_TABLE|ERR_NON_RESUMABLE|ERR_NO_DRAM_ESR_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_L2C << SER_TYPE_SHIFT) | EDESC_PRECISE_NONRESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE - ERR_DRAM_CONTENTS_SIZE}
@@ -848,7 +848,7 @@ error_table_entry_t dram_errors[] = {
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE},
 	{ "DAU", dump_l2_cache, l2_sun4v_report, correct_l2_dldau, null_fcn,
 		null_fcn,	/* DEBUG print function */
-		ERR_UE,
+		ERR_UE|ERR_NO_DRAM_DUMP,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_DRAM << SER_TYPE_SHIFT) | EDESC_UE_RESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE},
@@ -863,7 +863,7 @@ error_table_entry_t dram_errors[] = {
 error_table_entry_t precise_dau_errors[] = {
 	{ "DAU", dump_l2_cache, l2_sun4v_report, correct_l2_dldau, null_fcn,
 		null_fcn,	/* DEBUG print function */
-		ERR_UE|ERR_GL_STORED|ERR_STRANDS_PARKED|
+		ERR_UE|ERR_GL_STORED|ERR_STRANDS_PARKED|ERR_NO_DRAM_DUMP|
 		    ERR_CHECK_LINE_STATE|ERR_IO_PROT|ERR_LAST_IN_TABLE,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_DRAM << SER_TYPE_SHIFT) | EDESC_UE_RESUMABLE,
