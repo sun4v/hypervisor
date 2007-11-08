@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)error_tables.c	1.14	07/11/03 SMI"
+#pragma ident	"@(#)error_tables.c	1.15	07/11/08 SMI"
 
 #include <error_defs.h>
 #include <offsets.h>
@@ -864,7 +864,7 @@ error_table_entry_t precise_dau_errors[] = {
 	{ "DAU", dump_l2_cache, l2_sun4v_report, correct_l2_dldau, null_fcn,
 		null_fcn,	/* DEBUG print function */
 		ERR_UE|ERR_GL_STORED|ERR_STRANDS_PARKED|ERR_NO_DRAM_DUMP|
-		    ERR_CHECK_LINE_STATE|ERR_IO_PROT|ERR_LAST_IN_TABLE,
+		    ERR_IO_PROT|ERR_LAST_IN_TABLE,
 		SUN4V_MEM_RPRT,
 		(SER_TYPE_DRAM << SER_TYPE_SHIFT) | EDESC_UE_RESUMABLE,
 		ERR_DIAG_DATA_OFFSET + ERR_L2_SIZE}
