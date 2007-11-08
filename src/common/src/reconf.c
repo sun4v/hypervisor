@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)reconf.c	1.24	07/10/18 SMI"
+#pragma ident	"@(#)reconf.c	1.25	07/11/07 SMI"
 
 #include <stdarg.h>
 #include <sys/htypes.h>
@@ -913,7 +913,7 @@ static sp_ldc_sram_ptrs_t sp_ldc_sram_data[MAX_SP_LDC_CHANNELS] = {
 	{0xfff0e0433e, 0xfff0e00be0, 4, 0xfff0e0437f, 0xfff0e02120, 4},
 	{0xfff0e04343, 0xfff0e00d20, 4, 0xfff0e04384, 0xfff0e02260, 4},
 	{0xfff0e04348, 0xfff0e00e60, 4, 0xfff0e04389, 0xfff0e023a0, 4},
-	{0, 0, 0, 0, 0, 0},
+	{0xfff0e0434d, 0xfff0e00fa0, 4, 0xfff0e0438e, 0xfff0e024e0, 4},
 	{0xfff0e04352, 0xfff0e010e0, 4, 0xfff0e04393, 0xfff0e02620, 4},
 	{0xfff0e04357, 0xfff0e01220, 4, 0xfff0e04398, 0xfff0e02760, 4},
 	{0xfff0e0435c, 0xfff0e01360, 4, 0xfff0e0439d, 0xfff0e028a0, 4},
