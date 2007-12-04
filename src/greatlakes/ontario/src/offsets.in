@@ -45,7 +45,7 @@
 \
 \ offsets.in: input file to produce offsets.h using the stabs program
 \
-#pragma	ident	"@(#)offsets.in	1.87	07/07/09 SMI"
+#pragma	ident	"@(#)offsets.in	1.88	07/11/19 SMI"
 
 #ifndef _OFFSETS_H
 #define	_OFFSETS_H
@@ -88,6 +88,7 @@ config	CONFIG_SIZE
 	physmemsize	CONFIG_PHYSMEMSIZE
 	reloc		CONFIG_RELOC
 	parse_hvmd	CONFIG_PARSE_HVMD
+	parsed_hvmd	CONFIG_PARSED_HVMD
 	active_hvmd	CONFIG_ACTIVE_HVMD
 	guests		CONFIG_GUESTS
 	mblocks		CONFIG_MBLOCKS

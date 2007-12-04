@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)hvcontrol.c	1.13	07/10/18 SMI"
+#pragma ident	"@(#)hvcontrol.c	1.14	07/11/19 SMI"
 
 #include <sys/htypes.h>
 #include <traps.h>
@@ -852,6 +852,17 @@ op_start_hello(hvctl_msg_t *rcptp, hvctl_msg_t *replyp)
 	    ntoh64(rcptp->msg.hello.major),
 	    ntoh64(rcptp->msg.hello.minor)));
 
+	/*
+	 * Version checks:
+	 *
+	 * For now, we only support one major version.
+	 * We support all minor version variants, though.  These currently
+	 * include:
+	 * 0: baseline
+	 * 1: addition of HVctl_op_guest_only_reconf &
+	 *    HVctl_op_guest_only_delayed_reconf; support for simple rollback
+	 *    (i.e. not canceling delayed reconfig) on parse failure.
+	 */
 	if (ntoh64(rcptp->msg.hello.major) != HVCTL_VERSION_MAJOR_NUMBER) {
 		/* Currently only support 1 version */
 		replyp->hdr.op = hton16(HVctl_op_hello);
@@ -864,7 +875,14 @@ op_start_hello(hvctl_msg_t *rcptp, hvctl_msg_t *replyp)
 		DBGHL(c_printf("Version refused\n"));
 
 	} else {
+		uint64_t ldmd_hvctl_minor_vers = ntoh64(rcptp->msg.hello.minor);
+
 		config.hvctl_rand_num = __LINE__;	/* FIXME */
+		config.hvctl_version_major = ntoh64(rcptp->msg.hello.major);
+		if (ldmd_hvctl_minor_vers <= HVCTL_VERSION_MINOR_NUMBER)
+			config.hvctl_version_minor = ldmd_hvctl_minor_vers;
+		else
+			config.hvctl_version_minor = HVCTL_VERSION_MINOR_NUMBER;
 
 		replyp->hdr.op = hton16(HVctl_op_challenge);
 		replyp->hdr.status = hton16(HVctl_st_ok);

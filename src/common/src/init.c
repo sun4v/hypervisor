@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)init.c	1.20	07/10/18 SMI"
+#pragma ident	"@(#)init.c	1.21	07/11/19 SMI"
 
 #include  <stdarg.h>
 #include  <sys/htypes.h>
@@ -104,20 +104,18 @@ fake_reconfig(bin_md_t *hvmdp)
 {
 	hvctl_msg_t	cmd;
 	hvctl_msg_t	reply;
+	/*LINTED*/
+	hvctl_status_t	reconf_result;
 
 	cmd.hdr.op = HVctl_op_reconfigure;
 	cmd.hdr.status = 0;
 	cmd.msg.reconfig.hvmdp = (uint64_t)hvmdp;
-	cmd.msg.reconfig.guestid = 0;
+	cmd.msg.reconfig.guestid = INVALID_GID;
 	reply = cmd;
 
 	DBGINIT(c_printf("Fake reconfig:\n"));
-#ifdef DEBUG
-	c_printf("returned status 0x%x\n", op_reconfig(&cmd, &reply, false,
-	    false));
-#else
-	(void) op_reconfig(&cmd, &reply, false, false);
-#endif	/* DEBUG */
+	reconf_result = op_reconfig(&cmd, &reply, false, false);
+	DBGINIT(c_printf("returned status 0x%x\n", reconf_result));
 }
 
 
@@ -728,10 +726,17 @@ c_guest_exit(guest_t *guestp, int reason)
 	if (config.del_reconf_gid == guestp->guestid) {
 		DBGINIT(c_printf("performing delayed reconfig: guestid=0x%x\n",
 		    guestp->guestid));
-		commit_reconfig(false, false);
+		/*
+		 * Need to re-run both parse & commit phases to regenerate
+		 * the *->pip info, which becomes stale in a rollback
+		 * scenario.
+		 */
 		config.del_reconf_gid = INVALID_GID;
+		spinlock_exit(&config.del_reconf_lock);
+		fake_reconfig(config.parse_hvmd);
+	} else {
+		spinlock_exit(&config.del_reconf_lock);
 	}
-	spinlock_exit(&config.del_reconf_lock);
 
 	/*
 	 * send a msg to hvctl channel .. unless it

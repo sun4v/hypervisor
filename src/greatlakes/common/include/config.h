@@ -49,7 +49,7 @@
 #ifndef _CONFIG_H
 #define	_CONFIG_H
 
-#pragma ident	"@(#)config.h	1.39	07/07/18 SMI"
+#pragma ident	"@(#)config.h	1.40	07/11/19 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -250,7 +250,7 @@ struct config {
 	/* HV state as reflected by a HV MD */
 	void		*active_hvmd;	/* active hypervisor MD */
 	void		*parse_hvmd;	/* hypervisor MD being parsed */
-
+	void		*parsed_hvmd;	/* parsed (but not committed) HV MD */
 	uint64_t	reloc;		/* hv relocation offset */
 
 	void		*guests;	/* pointer to base of guests array */

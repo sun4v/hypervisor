@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)reconf.c	1.25	07/11/07 SMI"
+#pragma ident	"@(#)reconf.c	1.26	07/11/21 SMI"
 
 #include <stdarg.h>
 #include <sys/htypes.h>
@@ -1859,11 +1859,17 @@ commit_reconfig(bool_t isdelayed, bool_t guest_only)
 {
 	res_info_t *resp;
 
-	/*
-	 * Do nothing for HVctl_op_guest_delayed_reconf
-	 */
-	if (isdelayed && !guest_only)
+	if (isdelayed && !guest_only) {
+		/*
+		 * for HVctl_op_guest_delayed_reconf, all we do is stash
+		 * previously parsed HV MD. This is restored if there's a parse
+		 * failure during a delayed reconfig operation (but not the
+		 * operation that initiated the delayed reconfig).
+		 */
+		config.parsed_hvmd = config.parse_hvmd;
+
 		return;
+	}
 
 	/*
 	 * NOTE: This is brute force, but for each resource
@@ -1936,6 +1942,35 @@ init_reconfig_error_reply(hvctl_msg_t *replyp, int code)
 	replyp->msg.rcfail.code = hton32(code);
 	replyp->msg.rcfail.nodeidx = hton32(-1);
 	replyp->msg.rcfail.resid = hton32(-1);
+}
+
+/* Assumes config.del_reconf_lock held */
+static void
+del_reconf_parse_failure(void)
+{
+	if (config.del_reconf_gid != INVALID_GID) {
+		/*
+		 * Rollback or cancel delayed reconfig?
+		 * Rollback requires some specific guarantees from
+		 * the LDom Manager in terms of preserving the
+		 * contents of the previously parsed MDs.  This support
+		 * became available with the LDom Manager that implements
+		 * version 1.1 of the HVCTL interface.
+		 */
+		if (config.hvctl_version_minor >= 1) {
+			/*
+			 * Rollback to previously pending configuration.
+			 */
+			ASSERT(config.parsed_hvmd != NULL);
+			config.parse_hvmd = config.parsed_hvmd;
+		} else {
+			/*
+			 * Cancel pending delayed reconfiguration.
+			 */
+			config.del_reconf_gid = INVALID_GID;
+			config.parsed_hvmd = NULL;
+		}
+	}
 }
 
 /*
@@ -2025,8 +2060,7 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed,
 	status = preparse_hvmd(mdp);
 	if (status != HVctl_st_ok) {
 		if (isdelayed) {
-			/* cancel any pending delayed reconfig */
-			config.del_reconf_gid = INVALID_GID;
+			del_reconf_parse_failure();
 			spinlock_exit(&config.del_reconf_lock);
 		}
 
@@ -2111,8 +2145,7 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed,
 			DBG(c_printf("fail status 0x%x\n", status));
 
 			if (isdelayed) {
-				/* cancel any pending delayed reconfig */
-				config.del_reconf_gid = INVALID_GID;
+				del_reconf_parse_failure();
 				spinlock_exit(&config.del_reconf_lock);
 			}
 
@@ -2144,8 +2177,7 @@ op_reconfig(hvctl_msg_t *cmdp, hvctl_msg_t *replyp, bool_t isdelayed,
 			DBG(c_printf("fail status 0x%x\n", status));
 
 			if (isdelayed) {
-				/* cancel any pending delayed reconfig */
-				config.del_reconf_gid = INVALID_GID;
+				del_reconf_parse_failure();
 				spinlock_exit(&config.del_reconf_lock);
 			}
 

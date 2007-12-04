@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)main.s	1.9	07/09/27 SMI"
+	.ident	"@(#)main.s	1.10	07/11/19 SMI"
 
 /*
  * Niagara2 startup code
@@ -291,6 +291,8 @@
 
 	! Stash away the boot configs HV md.
 	stx	%i2, [%i0 + CONFIG_PARSE_HVMD]
+	! Zero out the restore area for delayed reconfig parse failure
+	stx	%g0, [%i0 + CONFIG_PARSED_HVMD]
 	mov	%i2, %i4
 	! %i4 - hypervisor description
 

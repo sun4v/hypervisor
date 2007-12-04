@@ -46,7 +46,7 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)mdsup.c	1.14	07/07/18 SMI"
+#pragma ident	"@(#)mdsup.c	1.15	07/11/19 SMI"
 
 /*
  * Support functions for MD scanning
@@ -246,6 +246,7 @@ void
 accept_hvmd()
 {
 	config.active_hvmd = config.parse_hvmd;
+	config.parsed_hvmd = NULL;
 }
 
 
