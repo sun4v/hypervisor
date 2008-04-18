@@ -1,12 +1,55 @@
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+* ========== Copyright Header Begin ==========================================
+*
+* Hypervisor Software File: hypervisor.h
+* 
+* Copyright (c) 2006 Sun Microsystems, Inc. All Rights Reserved.
+* 
+*  - Do no alter or remove copyright notices
+* 
+*  - Redistribution and use of this software in source and binary forms, with 
+*    or without modification, are permitted provided that the following 
+*    conditions are met: 
+* 
+*  - Redistribution of source code must retain the above copyright notice, 
+*    this list of conditions and the following disclaimer.
+* 
+*  - Redistribution in binary form must reproduce the above copyright notice,
+*    this list of conditions and the following disclaimer in the
+*    documentation and/or other materials provided with the distribution. 
+* 
+*    Neither the name of Sun Microsystems, Inc. or the names of contributors 
+* may be used to endorse or promote products derived from this software 
+* without specific prior written permission. 
+* 
+*     This software is provided "AS IS," without a warranty of any kind. 
+* ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES, 
+* INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A 
+* PARTICULAR PURPOSE OR NON-INFRINGEMENT, ARE HEREBY EXCLUDED. SUN 
+* MICROSYSTEMS, INC. ("SUN") AND ITS LICENSORS SHALL NOT BE LIABLE FOR 
+* ANY DAMAGES SUFFERED BY LICENSEE AS A RESULT OF USING, MODIFYING OR 
+* DISTRIBUTING THIS SOFTWARE OR ITS DERIVATIVES. IN NO EVENT WILL SUN 
+* OR ITS LICENSORS BE LIABLE FOR ANY LOST REVENUE, PROFIT OR DATA, OR 
+* FOR DIRECT, INDIRECT, SPECIAL, CONSEQUENTIAL, INCIDENTAL OR PUNITIVE 
+* DAMAGES, HOWEVER CAUSED AND REGARDLESS OF THE THEORY OF LIABILITY, 
+* ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF 
+* SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+* 
+* You acknowledge that this software is not designed, licensed or
+* intended for use in the design, construction, operation or maintenance of
+* any nuclear facility. 
+* 
+* ========== Copyright Header End ============================================
+*/
+/*
+ * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _HYPERVISOR_H
 #define	_HYPERVISOR_H
 
-#pragma ident	"@(#)hypervisor.h	1.40	05/08/24 SMI"
+#pragma ident	"@(#)hypervisor.h	1.44	06/05/26 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,9 +72,10 @@ extern "C" {
 /*
  * Hypervisor function numbers for CORE_TRAP
  */
-#define	API_VER		0x00
-#define	API_PUTCHAR	0x01
-#define	API_EXIT	0x02
+#define	API_SET_VERSION		0x00
+#define	API_PUTCHAR		0x01
+#define	API_EXIT		0x02
+#define	API_GET_VERSION		0x03
 
 
 /*
@@ -39,156 +83,162 @@ extern "C" {
  */
 
 /*
- * CPU/Memory APIs
+ * CPU/Memory APIs (Core API group)
  */
-#define	MACH_EXIT	0x00
-#define	MACH_DESC	0x01
-#define	MACH_SIR	0x02
+#define	MACH_EXIT		0x00
+#define	MACH_DESC		0x01
+#define	MACH_SIR		0x02
+#define	MACH_SET_WATCHDOG	0x05
 
-#define	CPU_START	0x10
-#define	CPU_STOP	0x11
-#define	CPU_YIELD	0x12
-#define	CPU_QCONF	0x14
-#define	CPU_QINFO	0x15
-#define	CPU_MYID	0x16
-#define	CPU_STATE	0x17
-#define	CPU_SET_RTBA	0x18
-#define	CPU_GET_RTBA	0x19
+#define	CPU_START		0x10
+#define	CPU_STOP		0x11
+#define	CPU_YIELD		0x12
+#define	CPU_QCONF		0x14
+#define	CPU_QINFO		0x15
+#define	CPU_MYID		0x16
+#define	CPU_STATE		0x17
+#define	CPU_SET_RTBA		0x18
+#define	CPU_GET_RTBA		0x19
 
-#define	MMU_TSB_CTX0	0x20
-#define	MMU_TSB_CTXNON0	0x21
-#define	MMU_DEMAP_PAGE	0x22
-#define	MMU_DEMAP_CTX	0x23
-#define	MMU_DEMAP_ALL	0x24
-#define	MMU_MAP_PERM_ADDR 0x25
-#define	MMU_FAULT_AREA_CONF 0x26
-#define	MMU_ENABLE	0x27
-#define	MMU_UNMAP_PERM_ADDR 0x28
-#define	MMU_TSB_CTX0_INFO 0x29
-#define	MMU_TSB_CTXNON0_INFO 0x2a
-#define	MMU_FAULT_AREA_INFO 0x2b
+#define	MMU_TSB_CTX0		0x20
+#define	MMU_TSB_CTXNON0		0x21
+#define	MMU_DEMAP_PAGE		0x22
+#define	MMU_DEMAP_CTX		0x23
+#define	MMU_DEMAP_ALL		0x24
+#define	MMU_MAP_PERM_ADDR	0x25
+#define	MMU_FAULT_AREA_CONF	0x26
+#define	MMU_ENABLE		0x27
+#define	MMU_UNMAP_PERM_ADDR	0x28
+#define	MMU_TSB_CTX0_INFO	0x29
+#define	MMU_TSB_CTXNON0_INFO	0x2a
+#define	MMU_FAULT_AREA_INFO	0x2b
 
-#define	MEM_SCRUB	0x31
-#define	MEM_SYNC	0x32
+#define	MEM_SCRUB		0x31
+#define	MEM_SYNC		0x32
 
-#define	CPU_MONDO_SEND	0x42
+#define	CPU_MONDO_SEND		0x42
 
-#define	TOD_GET		0x50
-#define	TOD_SET		0x51
+#define	TOD_GET			0x50
+#define	TOD_SET			0x51
 
-#define	CONS_GETCHAR	0x60
-#define	CONS_PUTCHAR	0x61
+#define	CONS_GETCHAR		0x60
+#define	CONS_PUTCHAR		0x61
+#define	CONS_READ		0x62
+#define	CONS_WRITE		0x63
 
 #if 1 /* Not in spec */
-#define	NVRAM_READ	0x70
-#define	NVRAM_WRITE	0x71
+#define	NVRAM_READ		0x70
+#define	NVRAM_WRITE		0x71
 #endif
 
-#define	TTRACE_BUF_CONF	0x90
-#define	TTRACE_BUF_INFO	0x91
-#define	TTRACE_ENABLE	0x92
-#define	TTRACE_FREEZE	0x93
-#define	DUMP_BUF_UPDATE	0x94
-#define	DUMP_BUF_INFO	0x95
+#define	TTRACE_BUF_CONF		0x90
+#define	TTRACE_BUF_INFO		0x91
+#define	TTRACE_ENABLE		0x92
+#define	TTRACE_FREEZE		0x93
+#define	DUMP_BUF_UPDATE		0x94
+#define	DUMP_BUF_INFO		0x95
 
-#define	INTR_DEVINO2SYSINO 0xa0
-#define	INTR_GETENABLED	0xa1
-#define	INTR_SETENABLED	0xa2
-#define	INTR_GETSTATE	0xa3
-#define	INTR_SETSTATE	0xa4
-#define	INTR_GETTARGET	0xa5
-#define	INTR_SETTARGET	0xa6
+#define	INTR_DEVINO2SYSINO	0xa0
+#define	INTR_GETENABLED		0xa1
+#define	INTR_SETENABLED		0xa2
+#define	INTR_GETSTATE		0xa3
+#define	INTR_SETSTATE		0xa4
+#define	INTR_GETTARGET		0xa5
+#define	INTR_SETTARGET		0xa6
 
 /*
- * VPCI APIs
+ * vPCI APIs (PCIe API group)
  */
-#define	VPCI_IOMMU_MAP	0xb0
-#define	VPCI_IOMMU_UNMAP 0xb1
-#define	VPCI_IOMMU_GETMAP 0xb2
-#define	VPCI_IOMMU_GETBYPASS 0xb3
-#define	VPCI_CONFIG_GET	0xb4
-#define	VPCI_CONFIG_PUT	0xb5
-#define	VPCI_IO_PEEK	0xb6
-#define	VPCI_IO_POKE	0xb7
-#define	VPCI_DMA_SYNC	0xb8
+#define	VPCI_IOMMU_MAP		0xb0
+#define	VPCI_IOMMU_UNMAP	0xb1
+#define	VPCI_IOMMU_GETMAP	0xb2
+#define	VPCI_IOMMU_GETBYPASS	0xb3
+#define	VPCI_CONFIG_GET		0xb4
+#define	VPCI_CONFIG_PUT		0xb5
+#define	VPCI_IO_PEEK		0xb6
+#define	VPCI_IO_POKE		0xb7
+#define	VPCI_DMA_SYNC		0xb8
 
 
-#define	MSIQ_CONF	0xc0
-#define	MSIQ_INFO	0xc1
-#define	MSIQ_GETVALID	0xc2
-#define	MSIQ_SETVALID	0xc3
-#define	MSIQ_GETSTATE	0xc4
-#define	MSIQ_SETSTATE	0xc5
-#define	MSIQ_GETHEAD	0xc6
-#define	MSIQ_SETHEAD	0xc7
-#define	MSIQ_GETTAIL	0xc8
+#define	MSIQ_CONF		0xc0
+#define	MSIQ_INFO		0xc1
+#define	MSIQ_GETVALID		0xc2
+#define	MSIQ_SETVALID		0xc3
+#define	MSIQ_GETSTATE		0xc4
+#define	MSIQ_SETSTATE		0xc5
+#define	MSIQ_GETHEAD		0xc6
+#define	MSIQ_SETHEAD		0xc7
+#define	MSIQ_GETTAIL		0xc8
 
-#define	MSI_GETVALID	0xc9
-#define	MSI_SETVALID	0xca
-#define	MSI_GETMSIQ	0xcb
-#define	MSI_SETMSIQ	0xcc
-#define	MSI_GETSTATE	0xcd
-#define	MSI_SETSTATE	0xce
+#define	MSI_GETVALID		0xc9
+#define	MSI_SETVALID		0xca
+#define	MSI_GETMSIQ		0xcb
+#define	MSI_SETMSIQ		0xcc
+#define	MSI_GETSTATE		0xcd
+#define	MSI_SETSTATE		0xce
 
-#define	MSI_MSG_GETMSIQ	0xd0
-#define	MSI_MSG_SETMSIQ	0xd1
-#define	MSI_MSG_GETVALID 0xd2
-#define	MSI_MSG_SETVALID 0xd3
+#define	MSI_MSG_GETMSIQ		0xd0
+#define	MSI_MSG_SETMSIQ		0xd1
+#define	MSI_MSG_GETVALID	0xd2
+#define	MSI_MSG_SETVALID	0xd3
 
 /*
  * Platform-specific APIs
  */
 
 /*
- * Greatlakes platform service channels
+ * Greatlakes platform service channels (SVC API group)
  */
 #ifdef CONFIG_SVC
-#define	SVC_SEND	0x80
-#define	SVC_RECV	0x81
-#define	SVC_GETSTATUS	0x82
-#define	SVC_SETSTATUS	0x83
-#define	SVC_CLRSTATUS	0x84
+#define	SVC_SEND		0x80
+#define	SVC_RECV		0x81
+#define	SVC_GETSTATUS		0x82
+#define	SVC_SETSTATUS		0x83
+#define	SVC_CLRSTATUS		0x84
 #endif
 
 /*
- * Processor-specific hcalls
+ * Niagara-specific hcalls (Niagara Perf Regs API group)
  */
 #define	NIAGARA_GET_PERFREG	0x100	/* Get Niagara JBUS/DRAM perf reg */
 #define	NIAGARA_SET_PERFREG	0x101	/* Set Niagara JBUS/DRAM perf reg */
 
 /*
- * Niagara MMU statistics
+ * Niagara MMU statistics (Niagara Perf Regs API group)
  */
 #define	NIAGARA_MMUSTAT_CONF	0x102
 #define	NIAGARA_MMUSTAT_INFO	0x103
 
 /*
- * Niagara Crypto Service Request
+ * Niagara Crypto Service Request (Niagara Crypto API group)
  */
-#define	NCS_REQUEST	0x110
+#define	NCS_REQUEST		0x110
 
-#define	FIRE_GET_PERFREG 0x120
-#define	FIRE_SET_PERFREG 0x121
+/*
+ * Fire-specific hcalls (Fire API group)
+ */
+#define	FIRE_GET_PERFREG	0x120
+#define	FIRE_SET_PERFREG	0x121
 
 /* ----------------------------------- */
 
 /*
- * Simulation-only APIs
+ * Simulation-only APIs (Core API group)
  */
 #ifdef CONFIG_DISK
-#define	DISK_READ	0xf0
-#define	DISK_WRITE	0xf1
+#define	DISK_READ		0xf0
+#define	DISK_WRITE		0xf1
 #endif
 
 #ifdef DEBUG /* Not yet FWARCd */
-#define	MMU_PERM_ADDR_INFO 0xfd
+#define	MMU_PERM_ADDR_INFO	0xfd
 #endif
 
 /*
- * Diagnostic hcalls
+ * Diagnostic hcalls (Diag and Test API group)
  */
-#define	DIAG_RA2PA	0x200	/* diagnostic partitions only */
-#define	DIAG_HEXEC	0x201	/* diagnostic partitions only */
+#define	DIAG_RA2PA		0x200	/* diagnostic partitions only */
+#define	DIAG_HEXEC		0x201	/* diagnostic partitions only */
 
 
 /* ----------------------------------- */
@@ -196,6 +246,23 @@ extern "C" {
 /*
  * Hypervisor manifest constants
  */
+
+/*
+ * Version API groups
+ * hcalls: API_SET_VERSION/API_GET_VERSION
+ */
+#define	API_GROUP_SUN4V		0x000
+#define	API_GROUP_CORE		0x001
+#define	API_GROUP_INTR		0x002
+#define	API_GROUP_PCI		0x100
+#define	API_GROUP_LDC		0x101
+#define	API_GROUP_SVC		0x102
+#define	API_GROUP_NCS		0x103
+#define	API_GROUP_NIAGARA	0x200
+#define	API_GROUP_FIRE		0x201
+#define	API_GROUP_DIAG		0x300
+
+#define	SUN4V_VERSION_INITIAL	1
 
 /*
  * CPU States

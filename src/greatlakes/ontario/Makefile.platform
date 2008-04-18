@@ -1,0 +1,161 @@
+# ========== Copyright Header Begin ==========================================
+# 
+# Hypervisor Software File: Makefile.platform
+# 
+# Copyright (c) 2006 Sun Microsystems, Inc. All Rights Reserved.
+# 
+#  - Do no alter or remove copyright notices
+# 
+#  - Redistribution and use of this software in source and binary forms, with 
+#    or without modification, are permitted provided that the following 
+#    conditions are met: 
+# 
+#  - Redistribution of source code must retain the above copyright notice, 
+#    this list of conditions and the following disclaimer.
+# 
+#  - Redistribution in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution. 
+# 
+#    Neither the name of Sun Microsystems, Inc. or the names of contributors 
+# may be used to endorse or promote products derived from this software 
+# without specific prior written permission. 
+# 
+#     This software is provided "AS IS," without a warranty of any kind. 
+# ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES, 
+# INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A 
+# PARTICULAR PURPOSE OR NON-INFRINGEMENT, ARE HEREBY EXCLUDED. SUN 
+# MICROSYSTEMS, INC. ("SUN") AND ITS LICENSORS SHALL NOT BE LIABLE FOR 
+# ANY DAMAGES SUFFERED BY LICENSEE AS A RESULT OF USING, MODIFYING OR 
+# DISTRIBUTING THIS SOFTWARE OR ITS DERIVATIVES. IN NO EVENT WILL SUN 
+# OR ITS LICENSORS BE LIABLE FOR ANY LOST REVENUE, PROFIT OR DATA, OR 
+# FOR DIRECT, INDIRECT, SPECIAL, CONSEQUENTIAL, INCIDENTAL OR PUNITIVE 
+# DAMAGES, HOWEVER CAUSED AND REGARDLESS OF THE THEORY OF LIABILITY, 
+# ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF 
+# SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+# 
+# You acknowledge that this software is not designed, licensed or
+# intended for use in the design, construction, operation or maintenance of
+# any nuclear facility. 
+# 
+# ========== Copyright Header End ============================================
+#
+# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+# ident	"@(#)Makefile.platform	1.1	06/04/26 SMI"
+#
+
+TOP = ../../../
+
+PLATFORM = ontario
+
+include ../../Makefile.family
+##############################################
+#
+# Platform configuration
+#
+PLAT_OPTIONS =
+#
+# Workarounds
+#
+# Items prefixed with DESUPPORT_NIAGARA_1x should be disabled by setting
+# the make variable DESUPPORT_NIAGARA_1x once Niagara 1.x parts are flushed.
+#
+# DESUPPORT_NIAGARA_1x=YES	# Leave unset until 1.x parts obsolete
+
+# Reset/Config doesn't properly initialize tick/stick
+PLAT_OPTIONS += -DRESETCONFIG_BROKENTICK
+
+# Enable DRAM and L2$ scrubbers in hypervisor
+PLAT_OPTIONS += -DRESETCONFIG_ENABLEHWSCRUBBERS
+
+# Niagara erratum #39: Halted strand not re-awakened by interrupt
+$(DESUPPORT_NIAGARA_1x)PLAT_OPTIONS += -DNIAGARA_ERRATUM_39
+
+# Niagara erratum #40: Locked TLB entry #63 gets replaced (now a "feature")
+PLAT_OPTIONS += -DNIAGARA_ERRATUM_40
+
+# Niagara erratum #41: Reserved Supervisor or User SPU stxa can silently abort SPU op
+PLAT_OPTIONS += -DNIAGARA_ERRATUM_41
+
+# Niagara erratum #43: Partial_raw Load after Block_Init_Store Hangs Thread
+$(DESUPPORT_NIAGARA_1x)PLAT_OPTIONS += -DNIAGARA_ERRATUM_43
+
+##############################################
+
+RESET = ../dumbreset
+
+TRAP_OBJS = traptable.o
+Q_OBJS = main.o setup.o mmu.o l2subr.o ncs.o	\
+	vpci_fire.o vpci_errs.o cpu_errs.o \
+	intr.o subr.o hcall.o \
+	vdev_intr.o vdev_console.o vdev_simdisk.o \
+	vdev_nvram.o vpci.o vpci_msi.o \
+	cyclic.o errs_common.o \
+	svc.o svcinternal.o svc_vbsc.o \
+	heartbeat.o \
+	md.o config.o
+
+RESET_OBJS = reset.o
+OBJS = begin.o $(TRAP_OBJS) $(PLAT_OBJS) $(Q_OBJS) version.o end.o
+
+$(OBJS): offsets.h
+
+version.o: $(FAMILY_SRC)/version.s
+	@echo "Version: $(QVERSION)"
+	$(AS) $(ASFLAGS) -DVERSION=\"$(QVERSION)\" $< -o $@ $(FAMILY_SRC)/version.s
+
+begin.o: $(FAMILY_SRC)/begin.s
+
+end.o: $(FAMILY_SRC)/end.s
+
+versioninfo:
+	@echo "Version: $(QVERSION)"
+
+q.bin: q
+	$(OBJCOPY) -O binary q q.bin
+	@what q.bin
+	@ls -l q.bin
+
+q: $(OBJS) $(FAMILY_SRC)/mapfile.q
+	$(LD) -o $@ -e start_master -dn -z defs -M $(FAMILY_SRC)/mapfile.q $(OBJS)
+	@size q
+
+q.dis: q0
+	dis q0 > $@
+
+q0: $(Q_OBJS) $(FAMILY_SRC)/mapfile.q0
+	$(LD) -o $@ -e start_master -dn -z defs -M $(FAMILY_SRC)/mapfile.q0 $(OBJS)
+
+reset.bin: reset
+	$(OBJCOPY) -O binary reset reset.bin
+
+reset: $(RESET_OBJS) $(RESET)/mapfile
+	$(LD) -o $@ -e start_reset -dn -z defs -M $(RESET)/mapfile $(RESET_OBJS)
+
+# This would work but only dumps the .text, nothing else
+#	elfdump -N .text -w q.bin q
+
+offsets.h: $(PLATFORM_SRC)/offsets.in
+	@grep "^#" $(PLATFORM_SRC)/offsets.in > offsets-n1.c
+	$(CC) -xdebugformat=stabs $(CFLAGS) $(CPPFLAGS) -g -S -o offsets-n1.s offsets-n1.c
+	@grep -v "^#" $(PLATFORM_SRC)/offsets.in > offsets.tmp
+	$(STABS) -t genassym -m lp64 offsets.tmp < offsets-n1.s > offsets.h
+	@$(RM) offsets-n1.c offsets-n1.s offsets.tmp
+
+%.o:	$(PLATFORM_SRC)/%.s
+	$(COMPILE.s) -o $@ $<
+
+%.o:	$(FAMILY_SRC)/%.s
+	$(COMPILE.s) -o $@ $<
+
+%.o:	$(PLATFORM_SRC)/%.c
+	$(COMPILE.c) -o $@ $<
+
+%.o:	$(FAMILY_SRC)/%.c
+	$(COMPILE.c) -o $@ $<
+
+%.o:	$(RESET)/%.s
+	$(COMPILE.s) -o $@ $<
+

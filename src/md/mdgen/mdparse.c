@@ -1,9 +1,52 @@
 /*
+* ========== Copyright Header Begin ==========================================
+*
+* Hypervisor Software File: mdparse.c
+* 
+* Copyright (c) 2006 Sun Microsystems, Inc. All Rights Reserved.
+* 
+*  - Do no alter or remove copyright notices
+* 
+*  - Redistribution and use of this software in source and binary forms, with 
+*    or without modification, are permitted provided that the following 
+*    conditions are met: 
+* 
+*  - Redistribution of source code must retain the above copyright notice, 
+*    this list of conditions and the following disclaimer.
+* 
+*  - Redistribution in binary form must reproduce the above copyright notice,
+*    this list of conditions and the following disclaimer in the
+*    documentation and/or other materials provided with the distribution. 
+* 
+*    Neither the name of Sun Microsystems, Inc. or the names of contributors 
+* may be used to endorse or promote products derived from this software 
+* without specific prior written permission. 
+* 
+*     This software is provided "AS IS," without a warranty of any kind. 
+* ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES, 
+* INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A 
+* PARTICULAR PURPOSE OR NON-INFRINGEMENT, ARE HEREBY EXCLUDED. SUN 
+* MICROSYSTEMS, INC. ("SUN") AND ITS LICENSORS SHALL NOT BE LIABLE FOR 
+* ANY DAMAGES SUFFERED BY LICENSEE AS A RESULT OF USING, MODIFYING OR 
+* DISTRIBUTING THIS SOFTWARE OR ITS DERIVATIVES. IN NO EVENT WILL SUN 
+* OR ITS LICENSORS BE LIABLE FOR ANY LOST REVENUE, PROFIT OR DATA, OR 
+* FOR DIRECT, INDIRECT, SPECIAL, CONSEQUENTIAL, INCIDENTAL OR PUNITIVE 
+* DAMAGES, HOWEVER CAUSED AND REGARDLESS OF THE THEORY OF LIABILITY, 
+* ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF 
+* SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+* 
+* You acknowledge that this software is not designed, licensed or
+* intended for use in the design, construction, operation or maintenance of
+* any nuclear facility. 
+* 
+* ========== Copyright Header End ============================================
+*/
+/*
  * Copyright 2005 Sun Microsystems, Inc.	 All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)mdparse.c	1.4	05/03/31 SMI"
+#pragma ident	"@(#)mdparse.c	1.5	05/12/17 SMI"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -338,7 +381,7 @@ parse_data(pair_entry_t *pep)
 			n = strlen(pp.u.strp)+1;
 			if (pep->u.data.len+n >= MAX_DATALEN)
 				lex_fatal("Internal error; out of data space");
-			memcpy(&(pep->u.data.buffer[pep->u.data.len]),
+			memmove(&(pep->u.data.buffer[pep->u.data.len]),
 				pp.u.strp, n);
 			pep->u.data.len += n;
 			Xfree(pp.u.strp);
@@ -437,7 +480,7 @@ do_assignment(pair_entry_t *pep, int fn)
 			mypp.utype = PE_data;
 			len = sizeof (uint64_t);
 				/* FIXME: memory order !! */
-			memcpy(mypp.u.data.buffer, &mypp.u.val, len);
+			memmove(mypp.u.data.buffer, &mypp.u.val, len);
 			mypp.u.data.len = len;
 			goto do_data;
 
@@ -448,7 +491,7 @@ do_assignment(pair_entry_t *pep, int fn)
 			mypp.utype = PE_data;
 			src = mypp.u.strp;
 			len = strlen(src) + 1;
-			memcpy(mypp.u.data.buffer, src, len);
+			memmove(mypp.u.data.buffer, src, len);
 			free(src);
 			mypp.u.data.len = len;
 			goto do_data;
@@ -479,17 +522,17 @@ do_assignment(pair_entry_t *pep, int fn)
 
 			switch (pp.utype) {
 			case PE_int:
-				memcpy(dest, &pp.u.val, len);
+				memmove(dest, &pp.u.val, len);
 				break;
 
 			case PE_string:
-				memcpy(dest, pp.u.strp, len);
+				memmove(dest, pp.u.strp, len);
 				free(pp.u.strp);
 				pp.u.strp = NULL;
 				break;
 
 			case PE_data:
-				memcpy(dest, pp.u.data.buffer, len);
+				memmove(dest, pp.u.data.buffer, len);
 				break;
 
 			default:

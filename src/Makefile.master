@@ -1,8 +1,49 @@
+# ========== Copyright Header Begin ==========================================
+# 
+# Hypervisor Software File: Makefile.master
+# 
+# Copyright (c) 2006 Sun Microsystems, Inc. All Rights Reserved.
+# 
+#  - Do no alter or remove copyright notices
+# 
+#  - Redistribution and use of this software in source and binary forms, with 
+#    or without modification, are permitted provided that the following 
+#    conditions are met: 
+# 
+#  - Redistribution of source code must retain the above copyright notice, 
+#    this list of conditions and the following disclaimer.
+# 
+#  - Redistribution in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution. 
+# 
+#    Neither the name of Sun Microsystems, Inc. or the names of contributors 
+# may be used to endorse or promote products derived from this software 
+# without specific prior written permission. 
+# 
+#     This software is provided "AS IS," without a warranty of any kind. 
+# ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES, 
+# INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A 
+# PARTICULAR PURPOSE OR NON-INFRINGEMENT, ARE HEREBY EXCLUDED. SUN 
+# MICROSYSTEMS, INC. ("SUN") AND ITS LICENSORS SHALL NOT BE LIABLE FOR 
+# ANY DAMAGES SUFFERED BY LICENSEE AS A RESULT OF USING, MODIFYING OR 
+# DISTRIBUTING THIS SOFTWARE OR ITS DERIVATIVES. IN NO EVENT WILL SUN 
+# OR ITS LICENSORS BE LIABLE FOR ANY LOST REVENUE, PROFIT OR DATA, OR 
+# FOR DIRECT, INDIRECT, SPECIAL, CONSEQUENTIAL, INCIDENTAL OR PUNITIVE 
+# DAMAGES, HOWEVER CAUSED AND REGARDLESS OF THE THEORY OF LIABILITY, 
+# ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF 
+# SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+# 
+# You acknowledge that this software is not designed, licensed or
+# intended for use in the design, construction, operation or maintenance of
+# any nuclear facility. 
+# 
+# ========== Copyright Header End ============================================
 #
-# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile.master	1.7	05/10/05 SMI"
+# ident	"@(#)Makefile.master	1.9	06/05/09 SMI"
 #
 
 COMPDIR = ${SUN_STUDIO}
@@ -13,7 +54,7 @@ QBINDIR = $(QTOOLS)/bin
 
 STABS = $(QBINDIR)/stabs
 OBJCOPY = $(QBINDIR)/objcopy
-AS = $(QBINDIR)/as
+AS = $(QBINDIR)/qas
 SAS = $(QBINDIR)/sas
 CC = $(SPRODIR)/bin/cc
 CPP = /usr/ccs/lib/cpp
@@ -29,9 +70,20 @@ PROTODIR = $(TOP)/../proto
 PROTO_INC = $(PROTODIR)/include
 PROTO_LIB = $(PROTODIR)/$(BUILD_ISA)/lib
 PROTO_BIN = $(PROTODIR)/$(BUILD_ISA)/bin
-PROTO_PLAT = $(PROTODIR)/$(PLATFORM)
+PROTO_PLAT = $(PROTODIR)/$(PLATFORM)/$(VARIANT)
+PROTO_PLAT_INC = $(PROTODIR)/$(PLATFORM)/include
+PROTO_GUEST_BIN = $(PROTODIR)/sun4v/
 
-CFLAGS += -v
+COMMON_INC = $(TOP)/include
+FAMILY_INC = $(TOP)/$(FAMILY)/common/include
+PLATFORM_INC = $(TOP)/$(FAMILY)/$(PLATFORM)/include
+COMMON_SRC = $(TOP)/common/src
+FAMILY_SRC = $(TOP)/$(FAMILY)/common/src
+PLATFORM_SRC = $(TOP)/$(FAMILY)/$(PLATFORM)/src
+OBJ_DIR =  $(TOP)/$(FAMILY)/$(PLATFORM)/$(VARIANT)
+
+INCFLAGS = -I$(PLATFORM_INC) -I$(FAMILY_INC) -I$(COMMON_INC)
+CFLAGS += -v $(INCFLAGS)
 
 .KEEP_STATE:
 
@@ -54,16 +106,19 @@ install :: all
 clobber :: clean
 
 $(SUBDIRS) ::
-	@cd $@ && pwd && $(MAKE) TOP=$(TOP)/.. $(TARGET)
+	@cd $@ && pwd && $(MAKE) $(TARGET)
 
 INS.file =	$(RM) $@; $(INS) -s -m 644 -f $(@D) $<
 INS.execfile =	$(RM) $@; $(INS) -s -m 644 -f $(@D) $<
 INS.dir =	$(INS) -s -d -m 755 $@
 
-$(PROTO_LIB) $(PROTO_INC) $(PROTO_BIN) $(PROTO_PLAT):
+$(PROTO_LIB) $(PROTO_INC) $(PROTO_BIN) $(PROTO_PLAT) $(PROTO_GUEST_BIN) $(PROTO_PLAT_INC):
 	$(INS.dir)
 
 $(PROTO_PLAT)/%: % $(PROTO_PLAT)
+	$(INS.file)
+
+$(PROTO_PLAT_INC)/%: % $(PROTO_PLAT_INC)
 	$(INS.file)
 
 $(PROTO_LIB)/%: % $(PROTO_LIB)
@@ -74,3 +129,50 @@ $(PROTO_INC)/%: % $(PROTO_INC)
 
 $(PROTO_BIN)/%: % $(PROTO_BIN)
 	$(INS.file)
+
+$(PROTO_GUEST_BIN)/%: % $(PROTO_GUEST_BIN)
+	$(INS.file)
+
+# Source browsing
+CSDIR	= $(TOP)
+CSDIRS	= $(TOP)/
+CSPATHS	= $(CSDIRS:%=$(CSDIR)/%)
+CSINCS	= -I$(TOP)
+CSCOPE	= cscope
+CTAGS	= ctags
+CSFLAGS	= -b
+CTFLAGS	= -wt
+
+.PRECIOUS:	cscope.out
+
+cscope.out: cscope.files FRC
+	${CSCOPE} ${CSFLAGS}
+
+cscope.files: FRC
+	@-$(RM) cscope.files cscope.files.raw
+	echo "$(CSINCS)" > cscope.files
+	-find $(CSDIRS) -name SCCS -prune -o \
+	    -type d -name '.del-*' -prune -o -type f \
+	    \( -name '*.[csh]' -o -name 'Makefile*' -o -name '*.il*' \) \
+	    -print > cscope.files.raw
+	-grep -v Makefile cscope.files.raw >> cscope.files
+	-grep Makefile cscope.files.raw >> cscope.files
+	-$(RM) cscope.files.raw
+	@wc -l cscope.files
+
+tags: tags.list FRC
+	${CTAGS} ${CTFLAGS} `cat tags.list`
+
+tags.list: cscope.files
+	@$(RM) tags.list
+	grep '\.[chs]$$' cscope.files > tags.list
+
+clean ::
+	$(RM) -f *.o offsets.h
+
+clobber ::
+	$(RM) -f *.o offsets.h q q.bin q0 reset reset.bin cscope.*
+
+.KEEP_STATE:
+
+FRC:
