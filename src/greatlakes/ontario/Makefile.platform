@@ -84,7 +84,6 @@ $(DESUPPORT_NIAGARA_1x)PLAT_OPTIONS += -DNIAGARA_ERRATUM_43
 
 ##############################################
 
-RESET = ../dumbreset
 
 TRAP_OBJS = traptable.o
 Q_OBJS = main.o setup.o mmu.o l2subr.o ncs.o	\

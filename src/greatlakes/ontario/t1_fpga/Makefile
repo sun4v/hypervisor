@@ -39,29 +39,34 @@
 # any nuclear facility. 
 # 
 # ========== Copyright Header End ============================================
-#
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
-# Use is subject to license terms.
-#
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
-#
 
-VARIANT = legion
+VARIANT = t1_fpga
 
-RESET = ../dumbreset
+RESET = ../fpga_1thread_reset      # use single thread Niagara reset code
 
 include ../Makefile.platform
+
+CP = /bin/cp -f
 
 ########################################
 
 OPTIONS = $(PLAT_OPTIONS)
+
+OPTIONS += -DT1_FPGA                 # T1 implementation in FPGA
+OPTIONS += -DT1_FPGA_UART_PREINIT    # expecting preinitialized UART device
+OPTIONS += -DT1_FPGA_MEMORY_PREINIT  # memory preinitialized
+OPTIONS += -DT1_FPGA_STAND_ALONE     # stand-alone program running on top of the hypervisor
+                                     # instead of OBP.
+#OPTIONS += -DT1_FPGA_FAST_MEMSCRUB  # use block store init instruction to initialize memory
+
+
 OPTIONS += -DDEBUG
 OPTIONS += -DSTRICT_API
 OPTIONS += -UNIAGARA_BRINGUP
-OPTIONS += -DCONFIG_DISK	# Simulated disk support
+OPTIONS += -UCONFIG_DISK	# Simulated disk support
 OPTIONS += -UCONFIG_FIRE		# Initialize and configure Fire
 OPTIONS += -UCONFIG_FIRE_EBUS	# Initialize and configure Fire EBus
-OPTIONS += -DCONFIG_IOBYPASS	# Guest I/O bypass access
+OPTIONS += -UCONFIG_IOBYPASS	# Guest I/O bypass access
 OPTIONS += -DCONFIG_SVC
 OPTIONS += -UCONFIG_VBSC_SVC	# VBSC comm channel
 OPTIONS += -UCONFIG_CN_SVC	# Consoles using svc channels
@@ -71,18 +76,45 @@ OPTIONS += -UDEBUG_LEGION	# Legion-specific debugging aids
 OPTIONS += -UCONFIG_LEGIONBCOPY	# Legion has physical bcopy magic trap
 OPTIONS += -UCONFIG_SAS		# Compile without copies for PPG simulation
 OPTIONS += -DCONFIG_HVUART
-OPTIONS += -DCONFIG_VERSION_TEST
+OPTIONS += -UCONFIG_VERSION_TEST
 
 ########################################
 
 OPTIONS += $(EXTRA_OPTIONS)
-OPTIONS += -DCONFIG_BRINGUP		# Force-enable helpful bringup aids
+OPTIONS += -UCONFIG_BRINGUP		# Force-enable helpful bringup aids
 
 ########################################
 
+PROM_FILE = prom.bin
+
 $(PROTO_PLAT)/q: q
 $(PROTO_PLAT)/reset: reset
+$(PROTO_PLAT)/$(PROM_FILE): $(PROM_FILE)
 
-all :: reset.bin q.bin
+all :: reset.bin q.bin $(PROM_FILE)
 
-install :: $(PROTO_PLAT)/q $(PROTO_PLAT)/q.bin $(PROTO_PLAT)/reset $(PROTO_PLAT)/reset.bin
+
+$(PROM_FILE): reset.bin q.bin guest-pd.bin hv-pd.bin make_prom
+	./make_prom $(PROM_FILE)
+
+hv-pd.bin: configs/1up-hv.bin
+	$(CP) configs/1up-hv.bin hv-pd.bin
+
+guest-pd.bin: configs/1up-md.bin
+	$(CP) configs/1up-md.bin guest-pd.bin
+
+configs/1up-hv.bin:
+	@cd configs ; make 1up-hv.bin
+
+configs/1up-md.bin:
+	@cd configs ; make 1up-md.bin
+
+clobber::
+	$(RM) guest-pd.bin hv-pd.bin $(PROM_FILE) make_prom
+	@cd configs && pwd && $(MAKE) clobber
+
+clean::
+	@cd configs && pwd && $(MAKE) clean
+
+
+install :: $(PROTO_PLAT)/q $(PROTO_PLAT)/q.bin $(PROTO_PLAT)/reset $(PROTO_PLAT)/reset.bin $(PROTO_PLAT)/$(PROM_FILE)

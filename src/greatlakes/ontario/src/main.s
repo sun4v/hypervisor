@@ -179,7 +179,12 @@
 	HVCALL(printversion)
 #endif
 
+#ifndef T1_FPGA_MEMORY_PREINIT
 	PRINT_NOTRAP("Scrubbing remaining hypervisor RAM\r\n")
+#else
+	PRINT_NOTRAP("Not scrubbing remaining hypervisor RAM. Using pre-initialized memory. \r\n")
+#endif
+
 	setx	_edata, %g7, %g1
 	brnz	%g1, 0f
 	nop
@@ -191,7 +196,9 @@
 	sub	%g1, %g5, %g1	! Start address
 	add	%i0, %i1, %g2	! end address + 1
 	sub	%g2, %g1, %g2	! length = end+1 - start
+#ifndef T1_FPGA_MEMORY_PREINIT
 	HVCALL(memscrub)
+#endif
 
 	!! %g5 offset
 	setx	config, %g6, %g1
@@ -390,8 +397,10 @@
 	HVCALL(setup_cpus)
 	HVCALL(setup_guests)
 	HVCALL(setup_dummytsb)
+#ifndef T1_FPGA
 	HVCALL(setup_iob)
 	HVCALL(setup_jbi)
+#endif
 	/*
 	 * Enable JBI error interrupts and clear SSIERROR
 	 * mask (%g1 = 1)
@@ -405,7 +414,9 @@
 	HVCALL(setup_services)
 
 	/* Must be before setup_vbsc_svc */
+#ifndef T1_FPGA
 	HVCALL(setup_err_svc)
+#endif /* ifndef T1_FPGA */
 #ifdef CONFIG_VBSC_SVC
 	HVCALL(setup_vbsc_svc)
 #endif
@@ -442,6 +453,7 @@
 	mulx	%g1, %g2, %g1				! => ticks
 	stx	%g1, [%i0 + CONFIG_CYCLIC_MAXD]		! ticks
 
+#ifndef T1_FPGA
 	/*
 	 * Setup the Error Steer & Start the Polling Daemon:
 	 */
@@ -455,6 +467,8 @@
 	and	%g1, %g2, %g1				! mask
 	or	%g3, %g1, %g3				! insert
 	stx	%g3, [%g4]				! set to this cpu
+#endif /* ifndef T1_FPGA */
+
 	/*
 	 * Initialize the poll daemon cyclic time.
 	 *
@@ -471,8 +485,10 @@
 	mulx	%g1, %g2, %g2				! time in ticks
 	stx	%g2, [%i0 + CONFIG_CE_POLL_TIME]	! ticks
 
+#ifndef T1_FPGA
 	!! %g1-7 modified
 	HVCALL(err_poll_daemon_start)			! start the daemon
+#endif /* ifndef T1_FPGA */
 
 	/*
 	 * Start heartbeat
@@ -656,11 +672,21 @@ find_work:
 	cmp	%g1, RESET_REASON_POR
 	bne,pt	%xcc, .master_guest_scrub_done
 	nop
+#ifndef T1_FPGA_MEMORY_PREINIT
 	PRINT_NOTRAP("Scrubbing guest memory\r\n");
+#else
+	PRINT_NOTRAP("Not scrubbing guest memory. Using pre-initialized guest memory. \r\n");
+#endif
+
 	ldx	[%g5 + GUEST_MEM_BASE], %g1
 	ldx	[%g5 + GUEST_MEM_SIZE], %g2
+#ifndef T1_FPGA_MEMORY_PREINIT
 	HVCALL(memscrub)
+#endif
 .master_guest_scrub_done:
+
+
+#ifndef T1_FPGA
 
 #ifdef RESETCONFIG_ENABLEHWSCRUBBERS
 /*
@@ -732,6 +758,7 @@ find_work:
 	DRAM_SCRUB_ENABLE(%g1, /* bank */ 2, %g2, %g3)
 	DRAM_SCRUB_ENABLE(%g1, /* bank */ 3, %g2, %g3)
 #endif
+#endif /* ifndef T1_FPGA */
 
 	/*
 	 * Calculate size of guest's partition description based
@@ -755,13 +782,20 @@ find_work:
 	/*
 	 * Copy guest's firmware image into the partition
 	 */
+#ifndef T1_FPGA_STAND_ALONE
 	PRINT_NOTRAP("Guest firmware copy\r\n")
+#else
+	PRINT_NOTRAP("Using pre-initialized Guest stand-alone program memory image. \r\n\r\n")
+#endif
+
 	set	GUEST_ROM_BASE, %g7
 	ldx	[%g5 + %g7], %g1
 	ldx	[%g5 + GUEST_MEM_BASE], %g2
 	set	GUEST_ROM_SIZE, %g7
 	ldx	[%g5 + %g7], %g3
+#ifndef T1_FPGA_STAND_ALONE
 	HVCALL(xcopy)
+#endif
 
 	!! %g5 - guest
 	!! %g6 - cpu
@@ -859,6 +893,7 @@ find_work:
 	mov	ERROR_NONRESUMABLE_QUEUE_TAIL, %g1
 	stxa	%g0, [%g1]ASI_QUEUE
 
+#ifndef T1_FPGA
 	! clear the l2 esr regs
 	! XXX need to log the nonzero error status
 	set	(NO_L2_BANKS - 1), %g5		! bank select
@@ -892,6 +927,8 @@ find_work:
 	! enable all errors, UEs should already be enabled
 	mov	(CEEN | NCEEN), %g1
 	stxa	%g1, [%g0]ASI_SPARC_ERR_EN
+
+#endif /* ifndef T1_FPGA */
 
 	! initialize the stack
 	set	CPU_STACK + STACK_VAL, %g2

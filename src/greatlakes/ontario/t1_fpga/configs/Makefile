@@ -39,50 +39,43 @@
 # any nuclear facility. 
 # 
 # ========== Copyright Header End ============================================
-#
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
-# Use is subject to license terms.
-#
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
-#
+  
+TOP = ../../../..
 
-VARIANT = legion
+include $(TOP)/Makefile.master
 
-RESET = ../dumbreset
+CONFIGS = 1up
+DBIN_CFGS = $(CONFIGS:%=%-md.bin)
+DTXT_CFGS = $(CONFIGS:%=%-md.txt)
+HBIN_CFGS = $(CONFIGS:%=%-hv.bin)
+HTXT_CFGS = $(CONFIGS:%=%-hv.txt)
 
-include ../Makefile.platform
+MDGEN=$(TOP)/md/mdgen/mdgen
 
-########################################
+all :: $(DBIN_CFGS) $(DTXT_CFGS) $(HBIN_CFGS) $(HTXT_CFGS)
 
-OPTIONS = $(PLAT_OPTIONS)
-OPTIONS += -DDEBUG
-OPTIONS += -DSTRICT_API
-OPTIONS += -UNIAGARA_BRINGUP
-OPTIONS += -DCONFIG_DISK	# Simulated disk support
-OPTIONS += -UCONFIG_FIRE		# Initialize and configure Fire
-OPTIONS += -UCONFIG_FIRE_EBUS	# Initialize and configure Fire EBus
-OPTIONS += -DCONFIG_IOBYPASS	# Guest I/O bypass access
-OPTIONS += -DCONFIG_SVC
-OPTIONS += -UCONFIG_VBSC_SVC	# VBSC comm channel
-OPTIONS += -UCONFIG_CN_SVC	# Consoles using svc channels
-OPTIONS += -UCONFIG_FPGA		# hardware fpga present
-OPTIONS += -DCONFIG_STATICTOD	# Time does not move - pending FPGA support
-OPTIONS += -UDEBUG_LEGION	# Legion-specific debugging aids
-OPTIONS += -UCONFIG_LEGIONBCOPY	# Legion has physical bcopy magic trap
-OPTIONS += -UCONFIG_SAS		# Compile without copies for PPG simulation
-OPTIONS += -DCONFIG_HVUART
-OPTIONS += -DCONFIG_VERSION_TEST
+%-md.pp: %.pdesc
+	$(CPP) $< $@
 
-########################################
+%-hv.pp: %.hdesc
+	$(CPP) $< $@
 
-OPTIONS += $(EXTRA_OPTIONS)
-OPTIONS += -DCONFIG_BRINGUP		# Force-enable helpful bringup aids
+%-md.bin: %-md.pp
+	$(MDGEN) --binary $(VERBOSE) --outfile $@ $<
 
-########################################
+%-md.txt: %-md.pp
+	$(MDGEN) --text --outfile $@ $<
 
-$(PROTO_PLAT)/q: q
-$(PROTO_PLAT)/reset: reset
+%-hv.bin: %-hv.pp
+	$(MDGEN) --binary $(VERBOSE) --outfile $@ $<
 
-all :: reset.bin q.bin
+%-hv.txt: %-hv.pp
+	$(MDGEN) --text --outfile $@ $<
 
-install :: $(PROTO_PLAT)/q $(PROTO_PLAT)/q.bin $(PROTO_PLAT)/reset $(PROTO_PLAT)/reset.bin
+clean ::
+	$(RM) *.pp $(HTXT_CFGS) $(DTXT_CFGS)
+
+clobber ::
+	$(RM) $(HBIN_CFGS) $(DBIN_CFGS)
+
+.KEEP_STATE:

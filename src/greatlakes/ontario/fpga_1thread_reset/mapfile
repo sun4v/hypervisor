@@ -1,6 +1,6 @@
 # ========== Copyright Header Begin ==========================================
 # 
-# Hypervisor Software File: Makefile
+# Hypervisor Software File: mapfile
 # 
 # Copyright (c) 2006 Sun Microsystems, Inc. All Rights Reserved.
 # 
@@ -39,50 +39,19 @@
 # any nuclear facility. 
 # 
 # ========== Copyright Header End ============================================
-#
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
-# Use is subject to license terms.
-#
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
-#
 
-VARIANT = legion
+note = NOTE;
+note : $NOTE ;
+note : .comment ;
+note : .stab.index ;
 
-RESET = ../dumbreset
+rom = LOAD ?RX V0xfff0000000 ;
+rom : .text ;
+rom : $PROGBITS ;
+rom : $NOBITS ;
+rom : .rodata  ;
+rom : .data  ;
+rom : .data1  ;
+rom : .bss ;
 
-include ../Makefile.platform
-
-########################################
-
-OPTIONS = $(PLAT_OPTIONS)
-OPTIONS += -DDEBUG
-OPTIONS += -DSTRICT_API
-OPTIONS += -UNIAGARA_BRINGUP
-OPTIONS += -DCONFIG_DISK	# Simulated disk support
-OPTIONS += -UCONFIG_FIRE		# Initialize and configure Fire
-OPTIONS += -UCONFIG_FIRE_EBUS	# Initialize and configure Fire EBus
-OPTIONS += -DCONFIG_IOBYPASS	# Guest I/O bypass access
-OPTIONS += -DCONFIG_SVC
-OPTIONS += -UCONFIG_VBSC_SVC	# VBSC comm channel
-OPTIONS += -UCONFIG_CN_SVC	# Consoles using svc channels
-OPTIONS += -UCONFIG_FPGA		# hardware fpga present
-OPTIONS += -DCONFIG_STATICTOD	# Time does not move - pending FPGA support
-OPTIONS += -UDEBUG_LEGION	# Legion-specific debugging aids
-OPTIONS += -UCONFIG_LEGIONBCOPY	# Legion has physical bcopy magic trap
-OPTIONS += -UCONFIG_SAS		# Compile without copies for PPG simulation
-OPTIONS += -DCONFIG_HVUART
-OPTIONS += -DCONFIG_VERSION_TEST
-
-########################################
-
-OPTIONS += $(EXTRA_OPTIONS)
-OPTIONS += -DCONFIG_BRINGUP		# Force-enable helpful bringup aids
-
-########################################
-
-$(PROTO_PLAT)/q: q
-$(PROTO_PLAT)/reset: reset
-
-all :: reset.bin q.bin
-
-install :: $(PROTO_PLAT)/q $(PROTO_PLAT)/q.bin $(PROTO_PLAT)/reset $(PROTO_PLAT)/reset.bin
+bss =;

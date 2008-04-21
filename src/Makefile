@@ -48,6 +48,6 @@
 
 TOP = .
 
-SUBDIRS = include greatlakes md sample
+SUBDIRS = include md greatlakes sample
 
 include $(TOP)/Makefile.master

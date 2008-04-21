@@ -76,7 +76,7 @@
  * than the specifically stored value.
  */
 	ENTRY_NP(memscrub)
-#ifdef CONFIG_FPGA /* running on real hardware */
+#if defined(CONFIG_FPGA) || defined(T1_FPGA_FAST_MEMSCRUB) /* running on real hardware */
 	brz	%g2, 2f
 	add	%g1, %g2, %g2
 	mov	ASI_BLK_INIT_P, %asi
@@ -96,7 +96,33 @@
 	nop
 2:	
 	membar	#Sync
-#endif
+
+#else /* if defined(CONFIG_FPGA) || defined(T1_FPGA_FAST_MEMSCRUB) */
+
+#ifdef T1_FPGA
+
+	brz	%g2, 2f
+	add	%g1, %g2, %g2
+1:
+	stx	%g0, [%g1 + 0x00]
+	stx	%g0, [%g1 + 0x08]
+	stx	%g0, [%g1 + 0x10]
+	stx	%g0, [%g1 + 0x18]
+	stx	%g0, [%g1 + 0x20]
+	stx	%g0, [%g1 + 0x28]
+	stx	%g0, [%g1 + 0x30]
+	stx	%g0, [%g1 + 0x38]
+	inc	0x40, %g1
+
+	cmp	%g1, %g2
+	blu,pt	%xcc, 1b
+	nop
+2:	
+	membar	#Sync
+#endif /* ifdef T1_FPGA */
+
+#endif /* if defined(CONFIG_FPGA) || defined(T1_FPGA_FAST_MEMSCRUB) */
+
 	jmp	%g7 + 4
 	nop
 	SET_SIZE(memscrub)
@@ -334,6 +360,9 @@
  * %g7 return address
  */
 	ENTRY_NP(uart_init)
+
+#ifndef T1_FPGA_UART_PREINIT
+
 	ldub	[%g1 + LSR_ADDR], %g2	! read LSR
 	stb	%g0, [%g1 + IER_ADDR] 	! clear IER
 	stb	%g0, [%g1 + FCR_ADDR] 	! clear FCR, disable FIFO
@@ -354,6 +383,14 @@
 	mov	LCR_8N1, %g3		! set LCR for 8-n-1, unset DLAB
 	jmp	%g7 + 4
 	stb	%g3, [%g1 + LCR_ADDR] 	! set LCR for 8-n-1, unset DLAB
+
+#else /* ifndef T1_FPGA_UART_PREINIT */
+
+	jmp	%g7 + 4
+	nop
+
+#endif /* ifndef T1_FPGA_UART_PREINIT */
+
 	SET_SIZE(uart_init)
 #endif /* CONFIG_HVUART */
 
