@@ -42,18 +42,20 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#ifndef _NIAGARA_HPRIVREGS_H
-#define	_NIAGARA_HPRIVREGS_H
+#ifndef _HPRIVREGS_H
+#define	_HPRIVREGS_H
 
-#pragma ident	"@(#)hprivregs.h	1.16	05/11/23 SMI"
+#pragma ident	"@(#)hprivregs.h	1.20	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <platform/hprivregs.h>
 
 /*
  * Niagara %ver
@@ -79,25 +81,6 @@ extern "C" {
 #define	MAXGL		3
 
 /*
- * Maximum number of ASI_QUEUE queue entries
- */
-#define	MAX_QUEUE_ENTRIES	256
-
-/*
- * Strand Status Register
- */
-#define	STR_STATUS_REG	%asr26
-
-#define	STR_STATUS_STRAND_ACTIVE	1
-#define	STR_STATUS_STRAND_ID_SHIFT	8
-#define	STR_STATUS_STRAND_ID_MASK	0x3
-#define	STR_STATUS_CORE_ID_SHIFT	10
-#define	STR_STATUS_CORE_ID_MASK		0x7
-
-#define	STR_STATUS_CPU_ID_SHIFT		STR_STATUS_STRAND_ID_SHIFT
-#define	STR_STATUS_CPU_ID_MASK		0x1f
-
-/*
  * hpstate:
  *
  * +-----------------------------------------------------+
@@ -110,8 +93,6 @@ extern "C" {
 #define	HPSTATE_HPRIV	0x0004
 #define	HPSTATE_RED	0x0020
 #define	HPSTATE_ENB	0x0800
-
-#define	HPSTATE_GUEST	(HPSTATE_ENB)
 
 /*
  * htstate:
@@ -162,13 +143,6 @@ extern "C" {
 #define	TLB_DEMAP_NUCLEUS	0x20
 
 /*
- * TLB DATA IN ASI VA bits
- * (ASI_DTLB_DATA_IN/ASI_ITLB_DATA_IN)
- */
-#define	TLB_IN_4V_FORMAT	(1 << 10)
-#define	TLB_IN_REAL		(1 << 9)
-
-/*
  * LSU Control Register
  */
 #define	ASI_LSUCR	0x45
@@ -185,27 +159,6 @@ extern "C" {
 #define	L2CR_DMMODE	0x00000002	/* L2$ Direct-mapped mode */
 #define	L2CR_SCRUBEN	0x00000004	/* L2$ Hardware scrub enable */
 
-#define	IOBBASE		0x9800000000
-#define	INT_MAN		0x000
-#define	INT_CTL		0x400
-#define	INT_VEC_DIS	0x800
-#define	PROC_SER_NUM	0x820
-#define	CORE_AVAIL	0x830
-#define	IOB_FUSE	0x840
-#define	J_INT_VEC	0xa00
-
-#define	IOBINT		0x9f00000000
-#define	J_INT_DATA0	0x600
-#define	J_INT_DATA1	0x700
-#define	J_INT_BUSY	0x900	/* step 8 count 32 */
-#define	J_INT_ABUSY	0xb00	/* aliased to current strand's J_INT_BUSY */
-
-#define	J_INT_BUSY_BUSY	0x0020
-#define	J_INT_BUSY_SRC_MASK 0x0001f
-
-#define	SSI_LOG		0xff00000018
-#define	SSI_TIMEOUT	0xff00010088
-
 /*
  * INT_VEC_DIS constants
  */
@@ -216,7 +169,7 @@ extern "C" {
 #define	INT_VEC_DIS_TYPE_IDLE	0x2
 #define	INT_VEC_DIS_TYPE_RESUME	0x3
 
-
+/* BEGIN CSTYLED */
 /*
  * Interrupt Vector Dispatch Macros
  */
@@ -227,12 +180,14 @@ extern "C" {
  *
  * Delay Slot: no
  */
+/* BEGIN CSTYLED */
 #define	INT_VEC_DSPCH_ONE(TYPE, tgt, scr1, scr2) \
 	setx	IOBBASE + INT_VEC_DIS, scr1, scr2			;\
 	set	(TYPE) << INT_VEC_DIS_TYPE_SHIFT, scr1			;\
 	sllx	tgt, INT_VEC_DIS_VCID_SHIFT, tgt			;\
 	or	scr1, tgt, scr1						;\
 	stx	scr1, [scr2]
+/* END CSTYLED */
 
 /*
  * INT_VEC_DSPCH_ALL - interrupt vector dispatch all
@@ -242,6 +197,7 @@ extern "C" {
  *
  * Delay Slot: no
  */
+/* BEGIN CSTYLED */
 #define	INT_VEC_DSPCH_ALL(TYPE, SRC, DST, scr1, scr2) \
 	.pushlocals							;\
 	rd	STR_STATUS_REG, scr2		/* my ID             */	;\
@@ -264,6 +220,7 @@ extern "C" {
 	brnz	scr2, 1b			/* more to do        */	;\
 	  inc	1 << INT_VEC_DIS_VCID_SHIFT, scr1			;\
 	.poplocals
+/* END CSTYLED */
 
 /*
  * IDLE_ALL_STRAND
@@ -274,33 +231,28 @@ extern "C" {
  *
  * Delay Slot: no
  */
-#define	IDLE_ALL_STRAND(cpup, scr1, scr2, scr3, scr4) \
-	CPU2ROOT_STRUCT(cpup, scr1)		/* ->config*/		;\
+/* BEGIN CSTYLED */
+#define	IDLE_ALL_STRAND(strand, scr1, scr2, scr3, scr4) \
+	ldx	[strand + STRAND_CONFIGP], scr1	/* ->config*/		;\
 	add	scr1, CONFIG_STACTIVE, scr3	/* ->active mask */	;\
 	add	scr1, CONFIG_STIDLE, scr4	/* ->idle mask   */	;\
 	INT_VEC_DSPCH_ALL(INT_VEC_DIS_TYPE_IDLE, scr3, scr4, scr1, scr2)
+/* END CSTYLED */
 
-/*
- * RESUME_ALL_STRAND
- *
- * Sends interrupt RESUME to all strands whose bit is set in CONFIG_STIDLE,
- * excluding the executing one. CONFIG_STACTIVE, CONFIG_STIDLE are
- * updated.
- *
- * Delay Slot: no
- */
-#define	RESUME_ALL_STRAND(cpup,scr1, scr2, scr3, scr4) \
-	CPU2ROOT_STRUCT(cpup, scr1)		/* ->config*/		;\
+/* BEGIN CSTYLED */
+#define	RESUME_ALL_STRAND(strand, scr1, scr2, scr3, scr4) \
+	ldx	[strand + STRAND_CONFIGP], scr1	/* ->config*/		;\
 	add	scr1, CONFIG_STIDLE, scr3	/* ->idle mask   */	;\
 	add	scr1, CONFIG_STACTIVE, scr4	/* ->active mask */	;\
 	INT_VEC_DSPCH_ALL(INT_VEC_DIS_TYPE_RESUME, scr3, scr4, scr1, scr2)
 
-#define	IS_STRAND_(state, cpup, strand, scr1, scr2) \
+#define	IS_STRAND_(state, vcpup, strand, scr1, scr2) \
 	mov	1, scr1				/* bit */		;\
 	sllx	scr1, strand, scr1		/* 1<<strand */		;\
-	CPU2ROOT_STRUCT(cpup, scr2)		/* ->config*/		;\
+	VCPU2ROOT_STRUCT(vcpup, scr2)		/* ->config*/		;\
 	ldx	[scr2 + state], scr2		/* state mask */	;\
 	btst	scr1, scr2			/* set cc */
+/* END CSTYLED */
 
 #define	IS_STRAND_ACTIVE(cpup, strand, scr1, scr2) \
 	IS_STRAND_(CONFIG_STACTIVE, cpup, strand, scr1, scr2)
@@ -311,8 +263,10 @@ extern "C" {
 #define	IS_STRAND_IDLE(cpup, strand, scr1, scr2) \
 	IS_STRAND_(CONFIG_STIDLE, cpup, strand, scr1, scr2)
 
+/* END CSTYLED */
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _NIAGARA_HPRIVREGS_H */
+#endif /* _HPRIVREGS_H */

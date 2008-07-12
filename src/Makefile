@@ -43,11 +43,11 @@
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.10	06/04/26 SMI"
+# ident	"@(#)Makefile	1.11	06/10/26 SMI"
 #
 
 TOP = .
 
-SUBDIRS = include md greatlakes sample
+SUBDIRS = include support greatlakes sample
 
 include $(TOP)/Makefile.master

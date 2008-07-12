@@ -42,27 +42,45 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident   "@(#)clock.h 1.1     04/08/02 SMI"
+#ifndef _CLOCK_H
+#define	_CLOCK_H
+
+#pragma ident	"@(#)clock.h	1.2	07/01/24 SMI"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Clock Unit Definitions
  */
 
-#define CLK_BASE  ( 0x96 << 32 )
+#define	CLK_BASE  (0x96 << 32)
 
-#define CLK_DIV_REG			0x00
-#define CLK_CTL_REG			0x08
-#define CLK_DLL_CNTL_REG		0x18
-#define CLK_DLL_BYP_REG			0x38
-#define CLK_JSYNC_REG			0x28
-#define CLK_DSYNC_REG			0x30
-#define CLK_VERSION_REG			0x40
+#define	CLK_DIV_REG			0x00
+#define	CLK_CTL_REG			0x08
+#define	CLK_DLL_CNTL_REG		0x18
+#define	CLK_DLL_BYP_REG			0x38
+#define	CLK_JSYNC_REG			0x28
+#define	CLK_DSYNC_REG			0x30
+#define	CLK_VERSION_REG			0x40
 
-#define CLK_CTL_MASK			0xffff000000000000
-#define CLK_DEBUG_INIT_REG		0x10		/* DEBUG ONLY, not for normal use */
+#define	CLK_CTL_MASK			0xffff000000000000
+#define	CLK_DEBUG_INIT_REG		0x10		/* DEBUG ONLY */
 
+/*
+ * Clock Divider Register
+ */
+#define	CLK_DIV_MASK			0x1f
+#define	CLK_DIV_JDIV_SHIFT		0x08
+#define	CLK_DIV_SCALE_SHIFT		0x3
 
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _CLOCK_H */

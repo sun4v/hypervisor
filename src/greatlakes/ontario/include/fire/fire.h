@@ -42,19 +42,21 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _FIRE_FIRE_H
 #define	_FIRE_FIRE_H
 
-#pragma ident	"@(#)fire.h	1.5	05/06/01 SMI"
+#pragma ident	"@(#)fire.h	1.9	07/07/17 SMI"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <support.h>
 
 #define	FIRE_A_AID	(0x1e)
 #define	FIRE_B_AID	(FIRE_A_AID+1)
@@ -74,9 +76,9 @@ extern "C" {
 
 #define	FIRE_MSIEQNUM_MASK	((1 << 6) - 1)
 
-#define	FIRE_EQREC_SHIFT 6
-#define	FIRE_EQREC_SIZE (1 << FIRE_EQREC_SHIFT)
-#define	FIRE_NEQRECORDS 128
+#define	FIRE_EQREC_SHIFT	MSIEQ_REC_SHIFT
+#define	FIRE_EQREC_SIZE		MSIEQ_REC_SIZE
+#define	FIRE_NEQRECORDS		128
 
 #define	FIRE_EQSIZE	(FIRE_NEQRECORDS * FIRE_EQREC_SIZE)
 #define	FIRE_EQMASK	(FIRE_EQSIZE - 1)
@@ -111,19 +113,30 @@ extern "C" {
 
 #define	FIRE_TSB_SIZE		FIRE_TSB_256K
 
-#define	FIRE_IOMMU_SIZE(n)	(1 << ((n) + 10))
+#define	FIRE_IOMMU_SIZE(n)	(xULL(1) << ((n) + 10))
 
 #define	IOTTE_SIZE		8
 #define	IOTTE_SHIFT		3	/* log2(IOTTE_SIZE) */
 #define	IOMMU_PAGESHIFT		13	/* 2K */
-#define	IOMMU_PAGESIZE		(1 << IOMMU_PAGESHIFT)
+#define	IOMMU_PAGESIZE		(xULL(1) << IOMMU_PAGESHIFT)
+
+#define	EQALIGN			(xULL(512) * xULL(1024))	/* 512K Align */
+#define	EQ_MAX_SIZE		(FIRE_NEQS * FIRE_EQSIZE)
+#define	IOMMU_EQ_RESERVE	((EQ_MAX_SIZE + EQALIGN - 1) & ~(EQALIGN - 1))
 
 #define	IOMMU_SPACE		(FIRE_IOMMU_SIZE(FIRE_TSB_SIZE) << \
 				    IOMMU_PAGESHIFT)
-#define	IOTSB_INDEX_MASK	((IOMMU_SPACE/IOMMU_PAGESIZE) - 1)
+/*
+ * We carve out a 512K aligned chunk (IOMMU_EQ_RESERVE) of the DVMA range
+ * for MSI Event Queues. So we make sure the max idx a guest can pass for
+ * a map call doesn't trample on the event queues.
+ */
+#define	IOTSB_INDEX_MAX		(((IOMMU_SPACE - IOMMU_EQ_RESERVE) >> \
+				    IOMMU_PAGESHIFT) - 1)
 #define	IOTSB_SIZE		((IOMMU_SPACE/IOMMU_PAGESIZE) * IOTTE_SIZE)
 
 #define	FIRE_IOTTE_V_SHIFT	63
+#define	FIRE_IOTTE_W_SHIFT	1
 #define	FIRE_INTMR_V_SHIFT	31
 #define	FIRE_INTMR_MDO_MODE_SHIFT 63
 #define	FIRE_MSIMR_V_SHIFT	63
@@ -132,6 +145,12 @@ extern "C" {
 #define	FIRE_EQREC_TYPE_SHIFT	56
 #define	FIRE_EQCCR_E2I_SHIFT	47
 #define	FIRE_EQCCR_COVERR	57
+#define	FIRE_EQCSR_EN_SHIFT	44
+#define	FIRE_EQCSR_ENOVERR	57
+
+#define	FIRE_IO_TTE(x)	 ((x) | (1ull << FIRE_IOTTE_V_SHIFT)	\
+			    | (1ull << FIRE_IOTTE_W_SHIFT))
+#define	FIRE_DVMA_RANGE_MAX	(xULL(1) << 32)
 
 #define	MSI_EQ_BASE_BYPASS_ADDR	(0xfffc000000000000LL)
 
@@ -179,7 +198,12 @@ extern "C" {
 #define	FIRE_IOMMU_BYPASS_BASE	(0xffffc000000000000LL)
 #define	FIRE_JBUS_ID_MR_MASK	0xf
 #define	FIRE_REV_1		0x1
-#define	FIRE_REV_2		0x3
+#define	FIRE_REV_2_0		0x3
+#define	FIRE_REV_2_1		0x4
+
+#define	FIRE_TLU_CTL_NPWR_EN	0x100000
+#define	FIRE_TLU_STS_STATUS_MASK	0xf
+#define	FIRE_TLU_STS_STATUS_DATA_LINK_ACTIVE	0x4
 
 #ifdef __cplusplus
 }

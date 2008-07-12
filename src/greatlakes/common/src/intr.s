@@ -42,326 +42,118 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)intr.s	1.31	06/05/30 SMI"
-
-	.file	"intr.s"
+	.ident	"@(#)intr.s	1.43	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
-#include <hypervisor.h>
-#include <sparcv9/misc.h>
 #include <asi.h>
-#include <mmu.h>
 #include <hprivregs.h>
-#include <sun4v/traps.h>
 #include <sun4v/asi.h>
-#include <sun4v/mmu.h>
-#include <sun4v/queue.h>
-
 #include <offsets.h>
 #include <guest.h>
-#include <cpu.h>
-#include <config.h>
+#include <intr.h>
 #include <vdev_intr.h>
-#include <guest.h>
 #include <util.h>
-#include <abort.h>
-#include <iob.h>
+#include <debug.h>
 
-
-#define DEV_MONDO_QUEUE_ENTRY(cpu, entry, tail, scr, qfull_label,\
-		 noq_label)				\
-	ldx	[cpu + CPU_DEVQ_BASE], entry		;\
-	brz,pn entry, noq_label				;\
-	mov	DEV_MONDO_QUEUE_TAIL, scr		;\
-	ldxa	[scr]ASI_QUEUE, scr			;\
-	add	scr, Q_EL_SIZE, tail			;\
-	add	entry, scr, entry			;\
-	ldx	[cpu + CPU_DEVQ_MASK], scr		;\
-	and	tail, scr, tail				;\
-	mov	DEV_MONDO_QUEUE_HEAD, scr		;\
-	ldxa	[scr]ASI_QUEUE, scr			;\
-	cmp	tail, scr				;\
-	be,pn	%xcc, qfull_label			;\
-	nop
-
-#ifdef DEBUG
-/*
- * Use stxa to ASI_BLK_INIT_P to reduce memory latency.
- */
-#define CLRQENTRY(r_cpu, base, offset, scr1)	\
-	ldx	[r_cpu + base], scr1		;\
-	add	scr1, offset, scr1		;\
-	stxa	%g0, [scr1]ASI_BLK_INIT_P	;\
-	membar	#Sync				;\
-	stx	%g0, [scr1 + 0x08]		;\
-	stx	%g0, [scr1 + 0x10]		;\
-	stx	%g0, [scr1 + 0x18]		;\
-	stx	%g0, [scr1 + 0x20]		;\
-	stx	%g0, [scr1 + 0x28]		;\
-	stx	%g0, [scr1 + 0x30]		;\
-	stx	%g0, [scr1 + 0x38]
-#else
-#define CLRQENTRY(cpu, base, offset, scr1)
-#endif
-
-#define r_cpu   %g1
-#define r_qtail %g2
-#define r_qins  %g3
-#define r_qmask %g4
-#define r_qnext %g5
-#define r_tmp1  %g6
-
-	! Mondo handler routines
+	/*
+	 * cpu_mondo -
+	 *
+	 * handles an incoming cpu_mondo x-call from another
+	 * strand hosting a vcpu in the same domain as the current vcpu
+	 * on this strand.
+	 *
+	 * On entry:
+	 *  %g1 = vcpup
+	 *  %g2	= intr-type
+	 *
+	 * On exit:
+	 *  retry trapped instruction
+	 */
 	ENTRY(cpu_mondo)
+
 	/*
 	 * Update when we were called last
 	 */
-	rd	%tick, r_tmp1
-	stx	r_tmp1, [r_cpu + CPU_CMD_LASTPOKE]
+	rd	%tick, %g6
+	stx	%g6, [%g1 + CPU_CMD_LASTPOKE]
 
 	/*
 	 * Wait for mailbox to not be busy
 	 */
-1:	ldx	[r_cpu + CPU_COMMAND], r_tmp1
-	cmp	r_tmp1, CPU_CMD_BUSY
+1:	ldx	[%g1 + CPU_COMMAND], %g6
+	cmp	%g6, CPU_CMD_BUSY
 	be,pn	%xcc, 1b
-	cmp	r_tmp1, CPU_CMD_GUESTMONDO_READY
+	cmp	%g6, CPU_CMD_GUESTMONDO_READY
 	bne,pn	%xcc, .cpu_mondo_return
 	.empty
 
-	mov	CPU_MONDO_QUEUE_TAIL, r_qtail
-	ldxa	[r_qtail]ASI_QUEUE, r_qins
-	add	r_qins, Q_EL_SIZE, r_qnext
-	ldx	[r_cpu + CPU_CPUQ_MASK], r_tmp1
-	and	r_qnext, r_tmp1, r_qnext
-	mov	CPU_MONDO_QUEUE_HEAD, r_qtail
-	ldxa	[r_qtail]ASI_QUEUE, r_qmask
-	cmp	r_qnext, r_qmask
+	mov	CPU_MONDO_QUEUE_TAIL, %g2
+	ldxa	[%g2]ASI_QUEUE, %g3
+	add	%g3, Q_EL_SIZE, %g5
+	ldx	[%g1 + CPU_CPUQ_MASK], %g6
+	and	%g5, %g6, %g5
+	mov	CPU_MONDO_QUEUE_HEAD, %g2
+	ldxa	[%g2]ASI_QUEUE, %g4
+	cmp	%g5, %g4
 	be,pn	%xcc, .cpu_mondo_return	! queue is full
-	mov	CPU_MONDO_QUEUE_TAIL, r_qtail
-	stxa	r_qnext, [r_qtail]ASI_QUEUE ! new tail pointer
-	CLRQENTRY(r_cpu, CPU_CPUQ_BASE, r_qnext, r_tmp1)
-	ldx	[r_cpu + CPU_CPUQ_BASE], r_tmp1
-	add	r_qins, r_tmp1, r_qnext
+	  ldx	[%g1 + CPU_CPUQ_BASE], %g6
+
+	! Simply return and drop mondo if Q was unconfigured from under us
+	brz	%g6, .cpu_mondo_return
+	  mov	CPU_MONDO_QUEUE_TAIL, %g2
+	stxa	%g5, [%g2]ASI_QUEUE ! new tail pointer
+	add	%g3, %g6, %g5
 
 	/* Fill in newly-allocated cpu mondo entry */
-	ldx	[r_cpu + CPU_CMD_ARG0], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x0]
-	ldx	[r_cpu + CPU_CMD_ARG1], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x8]
-	ldx	[r_cpu + CPU_CMD_ARG2], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x10]
-	ldx	[r_cpu + CPU_CMD_ARG3], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x18]
-	ldx	[r_cpu + CPU_CMD_ARG4], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x20]
-	ldx	[r_cpu + CPU_CMD_ARG5], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x28]
-	ldx	[r_cpu + CPU_CMD_ARG6], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x30]
-	ldx	[r_cpu + CPU_CMD_ARG7], r_tmp1
-	stx	r_tmp1, [r_qnext + 0x38]
-	membar	#Sync
-	stx	%g0, [r_cpu + CPU_COMMAND] ! clear for next xcall
+	ldx	[%g1 + CPU_CMD_ARG0], %g6
+	stxa	%g6, [%g5]ASI_BLK_INIT_P
+	ldx	[%g1 + CPU_CMD_ARG1], %g6
+	stx	%g6, [%g5 + 0x8]
+	ldx	[%g1 + CPU_CMD_ARG2], %g6
+	stx	%g6, [%g5 + 0x10]
+	ldx	[%g1 + CPU_CMD_ARG3], %g6
+	stx	%g6, [%g5 + 0x18]
+	ldx	[%g1 + CPU_CMD_ARG4], %g6
+	stx	%g6, [%g5 + 0x20]
+	ldx	[%g1 + CPU_CMD_ARG5], %g6
+	stx	%g6, [%g5 + 0x28]
+	ldx	[%g1 + CPU_CMD_ARG6], %g6
+	stx	%g6, [%g5 + 0x30]
+	ldx	[%g1 + CPU_CMD_ARG7], %g6
+	stx	%g6, [%g5 + 0x38]
+	membar	#Sync		! make sure stores visible
+	stx	%g0, [%g1 + CPU_COMMAND] ! clear for next xcall
 .cpu_mondo_return:
 	retry
 	SET_SIZE(cpu_mondo)
 
-
-	ENTRY(ssi_mondo)
-	
-	/*
-	 * Check for JBUS error
-	 */
-	setx	JBI_ERR_LOG, %g1, %g2
-	ldx	[%g2], %g2
-	brnz,pn %g2, ue_jbus_err
-	nop
-
-	/*
-	 * Clear the INT_CTL.MASK bit for the SSI
-	 */
-	setx	IOBBASE, %g3, %g2
-        stx	%g0, [%g2 + INT_CTL + INT_CTL_DEV_OFF(IOBDEV_SSIERR)]
-
-	retry
-
-	SET_SIZE(ssi_mondo)
-
-/*
- * vdev_mondo - deliver a virtual mondo on the current cpu's
- * devmondo queue.
- *
- * %g1 - cpup
- * %g7 - return address
- * --
- *
- * Note: This function is called from the interrupt handler and also
- *	 as a tail function
- */
-	ENTRY(vdev_mondo)
-	!! %g1 = cpup
-	ldx	[%g1 + CPU_DEVQ_BASE], %g6
-	!! %g6 - devq base physical address
-	brz,pn	%g6, 1f
-	mov	DEV_MONDO_QUEUE_TAIL, %g2
-	ldxa	[%g2]ASI_QUEUE, %g3
-	!! %g3 = current devq entry offset
-	add	%g3, Q_EL_SIZE, %g5
-	!! %g3 = next devq entry offset
-	add	%g6, %g3, %g3
-	!! %g3 = current devq entry physical address
-	ldx	[%g1 + CPU_DEVQ_MASK], %g6
-	and	%g5, %g6, %g5
-	!! %g5 = next devq entry offset
-	/* check to see if adding this entry overflows the queue */
-	mov	DEV_MONDO_QUEUE_HEAD, %g2
-	ldxa	[%g2]ASI_QUEUE, %g4
-	cmp	%g5, %g4
-	be,pn	%xcc, .vecintr_qfull /* XXX */
-	mov	DEV_MONDO_QUEUE_TAIL, %g2
-	stxa	%g5, [%g2]ASI_QUEUE ! new tail pointer
-	CLRQENTRY(%g1, CPU_DEVQ_BASE, %g5, %g6)
-
-	/*
-	 * Determine vino to deliver
-	 *
-	 * XXX Replace with bitset of vinos that we atomically update
-	 */
-	ldx	[%g1 + CPU_VINTR], %g6
-	stx	%g0, [%g1 + CPU_VINTR]
-
-	CPU2GUEST_STRUCT(%g1, %g2) ! current guest
-	GUEST2VDEVSTATE(%g2, %g2)
-	VINO2MAPREG(%g2, %g6, %g6)
-	!! %g3 = current devq entry physical address
-	!! %g6 = vmapregp
-
-	/*
-	 * Update interrupt state to INTR_DELIVERED
-	 */
-	mov	INTR_DELIVERED, %g1
-	stb	%g1, [%g6 + MAPREG_STATE]
-
-	/*
-	 * Fill in the devmondo with the vino
-	 */
-	ldx	[%g6 + MAPREG_DATA0], %g1
-	stx	%g1, [%g3 + 0x00]
-	stx	%g0, [%g3 + 0x08]
-	stx	%g0, [%g3 + 0x10]
-	stx	%g0, [%g3 + 0x18]
-	stx	%g0, [%g3 + 0x20]
-	stx	%g0, [%g3 + 0x28]
-	stx	%g0, [%g3 + 0x30]
-1:
-	stx	%g0, [%g3 + 0x38]
-	HVRET
-	SET_SIZE(vdev_mondo)
-
-/*
- * cpu_in_error_finish - invoked from a cpu about to enter the error
- * state so another cpu can finish cleaning up.
- */
-	ENTRY(cpu_in_error_finish)
-	CPU_PUSH(%g7, %g2, %g3, %g4)		! save return address
-	CPU_STRUCT(%g1)
-
-	/*
-	 * Send a resumable erpt to the guest.  The fault cpu should have
-	 * left a valid erpt in the current cpu's ce err buf.
-	 */
-	add	%g1, CPU_CE_RPT, %g2
-	HVCALL(queue_resumable_erpt)
-
-	/*
-	 * If the heartbeat is disabled then it was running on the failed
-	 * cpu and needs to be restarted on this cpu.
-	 */
-	ROOT_STRUCT(%g2)
-	ldx	[%g2 + CONFIG_HEARTBEAT_CPU], %g2
-	cmp	%g2, -1
-	bne,pt	%xcc, 1f
-	nop
-	HVCALL(heartbeat_enable)
-1:
-
-	CPU_POP(%g7, %g1, %g2, %g5)
-	retry
-	SET_SIZE(cpu_in_error_finish)
-
-	! the mondo starting point.
-	! %g1	cpup
-	! %g2	mondo
-	ENTRY_NP(vecintr)
-	cmp	%g2, VECINTR_XCALL
-	beq,pt	%xcc, cpu_mondo
-	cmp	%g2, VECINTR_DEV
-	beq,pt	%xcc, dev_mondo
-#ifdef CONFIG_FPGA
-	cmp	%g2, VECINTR_FPGA
-	beq,pt	%xcc, svc_isr
-#endif
-	cmp	%g2, VECINTR_VDEV
-	bne,pt	%xcc, 1f
-	nop
-
-	HVCALL(vdev_mondo)
-	retry
-1:
-	cmp	%g2, VECINTR_SSIERR
-	beq,pt	%xcc, ssi_mondo
-	cmp	%g2, VECINTR_CPUINERR 
-	beq,pt	%xcc, cpu_in_error_finish
-	nop
-
-	! XXX unclaimed interrupt
-.vecintr_qfull:			! XXX need to do the right thing here
-	retry
-	SET_SIZE(vecintr)
 
 /*
  * insert_device_mondo_r
  *
  * %g2 = data0
  * %g7 + 4 = return address
+ *
+ * %g1 - %g6 trashed
  */
+	/*
+	 * FIXME: This should probably arrive with a pointer to the
+	 * vcpu the mondo is targeted at
+	 */
 	ENTRY_NP(insert_device_mondo_r)
-	CPU_STRUCT(%g1)
-	!! %g1 = cpup
-	!! %g4 = entry
-	!! %g5 = tail
-	!! %g6 = scratch
-	DEV_MONDO_QUEUE_ENTRY(%g1, %g4, %g5, %g6, .vecintr_qfull, \
-		.no_devmondo_q)
-	!! %g4 = new devmondo queue entry
-	!! %g5 = new devmondo queue tail
+	
+	VCPU_STRUCT(%g1)	/* FIXME ! */
+	mov	%g2, %g3
+	ba send_dev_mondo	! tail call returns to caller
+	set	1, %g2
 
-	! Now store the data in %g2 at %g4
-
-	stx	%g0, [%g4 + 0x38]
-	stx	%g0, [%g4 + 0x30]
-	stx	%g0, [%g4 + 0x28]
-	stx	%g0, [%g4 + 0x20]
-	stx	%g0, [%g4 + 0x18]
-	stx	%g0, [%g4 + 0x10]
-	stx	%g0, [%g4 + 0x08]
-	stx	%g2, [%g4 + 0x00]
-
-	!! %g1 = cpup
-	!! %g5 = tail
-	!! %g6 = scratch
-	CLRQENTRY(%g1, CPU_DEVQ_BASE, %g5, %g6)
-
-	mov	DEV_MONDO_QUEUE_TAIL, %g6
-	stxa	%g5, [%g6]ASI_QUEUE ! new tail pointer
-	HVRET
 	SET_SIZE(insert_device_mondo_r)
+
 
 /*
  * insert_device_mondo_p
@@ -369,56 +161,138 @@
  * %g1 = datap
  * %g7 + 4 = return address
  *
- * %g2 - %g6 trashed
+ * %g1 - %g6 trashed
  */
 	ENTRY_NP(insert_device_mondo_p)
-	CPU_STRUCT(%g2)
-	!! %g2 = cpup
-	!! %g4 = entry
-	!! %g5 = tail
-	!! %g6 = scratch
-	DEV_MONDO_QUEUE_ENTRY(%g2, %g4, %g5, %g6, .vecintr_qfull, \
-		.no_devmondo_q)
-	!! %g4 = new devmondo queue entry
-	!! %g5 = new tail
-
-	! Now store the data starting at %g4
-
-	ldx	[%g1 + 0x38], %g3
-	stx	%g3, [%g4 + 0x38]
-	ldx	[%g1 + 0x30], %g3
-	stx	%g3, [%g4 + 0x30]
-	ldx	[%g1 + 0x28], %g3
-	stx	%g3, [%g4 + 0x28]
-	ldx	[%g1 + 0x20], %g3
-	stx	%g3, [%g4 + 0x20]
-	ldx	[%g1 + 0x18], %g3
-	stx	%g3, [%g4 + 0x18]
-	ldx	[%g1 + 0x10], %g3
-	stx	%g3, [%g4 + 0x10]
-	ldx	[%g1 + 0x08], %g3
-	stx	%g3, [%g4 + 0x08]
-	ldx	[%g1 + 0x00], %g3
-	stx	%g3, [%g4 + 0x00]
-
-	!! %g2 = cpup
-	!! %g5 = tail
-	!! %g6 = scratch
-	CLRQENTRY(%g2, CPU_DEVQ_BASE, %g5, %g6)
-
-	mov	DEV_MONDO_QUEUE_TAIL, %g6
-	stxa	%g5, [%g6]ASI_QUEUE ! new tail pointer
-	HVRET
-
+	
+	mov	%g1, %g3
+	VCPU_STRUCT(%g1)
+	ba	send_dev_mondo	! tail call returns to caller
+	mov	%g0, %g2
 .no_devmondo_q:
-	/*
-	 * XXX Attempting to insert a devmondo w/o a queue.
-	 * The spec is not clear on what to do in this case
-	 * so for now, assume it is a guest programming error
-	 * and drop the mondo.
-	 */
-	HVRET
+	mov	%g7, %g5
+	PRINT("dev q unconfigured\r\n");
+	mov	%g5, %g7
 	SET_SIZE(insert_device_mondo_p)
+
+
+/*
+ * send_dev_mondo
+ *
+ * %g1 = vcpup
+ * %g2 = flag (0 = pointer to data, 1 = mondo) 
+ * %g3 = data (depending on value of flag)	 
+ * %g7 + 4 = return address
+ *
+ * %g2 - %g6 trashed
+ */
+	ENTRY_NP(send_dev_mondo)
+
+	add	%g1, CPU_DEVQ_LOCK, %g4
+	SPINLOCK_ENTER(%g4, %g5, %g6)
+	
+	ldx	[ %g1 + CPU_DEVQ_BASE ], %g4
+	brz,a	%g4, 4f		! Queue not configured exit!
+	  nop
+
+	ldx	[ %g1 + CPU_DEVQ_SHDW_TAIL ], %g5
+	add	%g5, Q_EL_SIZE, %g6
+	ldx	[%g1 + CPU_DEVQ_MASK ], %g4
+	and	%g6, %g4, %g6	
+	!! %g1 = vcpup
+	!! %g6 = new shadow tail
+	!! %g5 = shadow tail
+
+	stx	%g6, [ %g1 + CPU_DEVQ_SHDW_TAIL ]
+
+	ldx	[ %g1 + CPU_DEVQ_BASE ], %g4
+	add	%g5, %g4, %g5	! pointer to stuff mondo 
+
+	brz	%g2, 1f		! data or pointer in %g3?
+	nop
+
+	stx	%g3, [ %g5 + 0x00 ]
+	ba,a 	2f
+	
+1:
+	ldx	[ %g3 + 0x00 ], %g2
+	stx	%g2, [%g5 + 0x00]
+	ldx	[%g3 + 0x08], %g2
+	stx	%g2, [%g5 + 0x08]
+	ldx	[%g3 + 0x10], %g2
+	stx	%g2, [%g5 + 0x10]
+	ldx	[%g3 + 0x18], %g2
+	stx	%g2, [%g5 + 0x18]
+	ldx	[%g3 + 0x20], %g2
+	stx	%g2, [%g5 + 0x20]
+	ldx	[%g3 + 0x28], %g2
+	stx	%g2, [%g5 + 0x28]
+	ldx	[%g3 + 0x30], %g2
+	stx	%g2, [%g5 + 0x30]
+	ldx	[%g3 + 0x38], %g2
+	stx	%g2, [%g5 + 0x38]
+
+2:
+	! is local the target?
+	VCPU_STRUCT(%g3)
+	
+	cmp	%g3, %g1
+	bne	%xcc, 3f
+	 nop
+
+	! Just update the local cpu's devq since it is the target.
+	! %g6 = new shadow tail.	
+	
+	/*
+ 	 * XXX Sanity test that new tail does not corrupt head of queue
+	 */  	
+	set	DEV_MONDO_QUEUE_TAIL, %g4
+	ba	4f
+	stxa	%g6, [%g4] ASI_QUEUE
+3:
+	/*
+	 * Poke target to update DevQ
+	 * %g2 = target strand id
+	 */
+	VCPU2STRAND_STRUCT(%g1, %g2)
+	ldub	[%g2 + STRAND_ID], %g2
+	
+	! %g2 = target strand
+	
+	sllx	%g2, INT_VEC_DIS_VCID_SHIFT, %g3
+	or	%g3, VECINTR_VDEV, %g3
+	stxa	%g3, [%g0]ASI_INTR_UDB_W
+
+4:
+	add	%g1, CPU_DEVQ_LOCK, %g4
+	SPINLOCK_EXIT(%g4)
+	
+	HVRET
+	SET_SIZE(send_dev_mondo)
+
+
+/*
+ * vdev_mondo
+ * 
+ * %g1 = vcpup
+ * %g2-%g4 clobbered. 
+ */
+	ENTRY_NP(vdev_mondo)
+
+	add	 %g1,  CPU_DEVQ_LOCK, %g2
+	SPINLOCK_ENTER(%g2, %g3, %g4)
+
+	ldx	[ %g1 + CPU_DEVQ_SHDW_TAIL], %g3
+
+	set	DEV_MONDO_QUEUE_TAIL, %g4
+	stxa	%g3, [ %g4 ] ASI_QUEUE
+
+	add	 %g1,  CPU_DEVQ_LOCK, %g2
+	SPINLOCK_EXIT(%g2)
+	
+	HVRET		
+	SET_SIZE(vdev_mondo)
+
 
 /*
  * dev_mondo - handle an incoming JBus mondo
@@ -427,27 +301,46 @@
  * %g7 + 4 = return address
  */
 	ENTRY(dev_mondo)
-	!! XXX Check BUSY bit and ignore the dev mondo if it is not set
-	setx	IOBINT, %g4, %g6
-	ldx	[%g6 + J_INT_ABUSY], %g4
-	btst	J_INT_BUSY_BUSY, %g4
+	! XXX Check BUSY bit and ignore the dev mondo if it is not set
+	setx	DEV_MONDO_INT, %g4, %g6
+	ldx	[%g6 + DEV_MONDO_INT_ABUSY], %g4
+	btst	DEV_MONDO_INT_ABUSY_BUSY, %g4
 	bz,pn	%xcc, 2f			! Not BUSY .. just ignore
-	ldx	[%g6 + J_INT_DATA0], %g2	! DATA0
-	stx	%g0, [%g6 + J_INT_ABUSY]	! Clear BUSY bit
+	ldx	[%g6 + DEV_MONDO_INT_DATA0], %g2	! THREADID[5:0],INO[5:0]
+	ldx	[%g6 + DEV_MONDO_INT_DATA1], %g3	! IGN[5:0],ZERO[5:0]
+	stx	%g0, [%g6 + DEV_MONDO_INT_ABUSY]	! Clear BUSY bit
 
 	! vINOs and what I/O bridge puts into DATA0 are
 	! the same therefore we don't need to translate
 	! anything here
 
-	srlx	%g2, DEVCFGPA_SHIFT, %g3
-	and	%g3, DEVIDMASK, %g3
-	and	%g2, NINOSPERDEV -1 , %g4
-
-	!! %g1 = cpup
-	!! %g2 = DATA0
-	!! %g3 = IGN
-	!! %g4 = INO
+	and	%g2, NINOSPERDEV - 1 , %g4
+	or	%g4, %g3, %g2
+	srlx	%g3, DEV_DEVINO_SHIFT, %g3
+	! %g1 = cpup
+	! %g2 = IGN,INO
+	! %g3 = IGN
+	! %g4 = INO
 	JMPL_VINO2DEVOP(%g2, DEVOPSVEC_MONDO_RECEIVE, %g1, %g6, 2f)
 2:
 	retry
 	SET_SIZE(dev_mondo)
+
+
+	/*
+	 * We were interrupted for a x-call mondo for something.
+	 * so we stash the state of the current vcpu and
+	 * jump to the main handler/scheduler function
+	 */
+	ENTRY_NP(hvxcall_mondo)
+
+	VCPU_STRUCT(%g2)
+	set	CPU_LAUNCH_WITH_RETRY, %g3
+	mov	1, %g1
+	stb	%g1, [%g2 + %g3]
+
+	HVCALL(vcpu_state_save)
+
+	ba,pt	%xcc, handle_hvmondo
+	  nop
+	SET_SIZE(hvxcall_mondo)

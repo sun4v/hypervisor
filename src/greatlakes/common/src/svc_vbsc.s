@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)svc_vbsc.s	1.19	06/05/30 SMI"
+	.ident	"@(#)svc_vbsc.s	1.28	07/05/29 SMI"
 
 	.file	"svc_vbsc.s"
 
@@ -66,11 +66,11 @@
 
 #include <config.h>
 #include <guest.h>
+#include <strand.h>
 #include <offsets.h>
 #include <svc.h>
 #include <svc_vbsc.h>
 #include <errs_common.h>
-#include <cpu.h>
 #include <util.h>
 #include <abort.h>
 #include <debug.h>
@@ -98,7 +98,7 @@
 	stx	%g2, [%g6 + (1 * 8)]
 	stx	%g1, [%g6 + (0 * 8)]
 	mov	1, %g4
-	sth	%g4, [%g5 + FPGA_Q_SEND]
+	stb	%g4, [%g5 + FPGA_Q_SEND]
 
 	/*
 	 * Wait for a non-zero status.  If we get an ACK then we're done.
@@ -106,7 +106,7 @@
 	 * to hv_abort we need to send a message to vbsc.  So keep trying.
 	 */
 .vbsc_send_polled_wait_for_ack:
-	lduh	[%g5 + FPGA_Q_STATUS], %g4
+	ldub	[%g5 + FPGA_Q_STATUS], %g4
 	andcc	%g4, (QINTR_ACK | QINTR_NACK | QINTR_BUSY | QINTR_ABORT), %g4
 	bz,pn	%xcc, .vbsc_send_polled_wait_for_ack
 	nop
@@ -114,7 +114,7 @@
 	bz,pt	%xcc, .vbsc_send_polled_resend
 	nop
 
-	sth	%g4, [%g5 + FPGA_Q_STATUS] ! clear status bits
+	stb	%g4, [%g5 + FPGA_Q_STATUS] ! clear status bits
 	HVRET
 	SET_SIZE(vbsc_send_polled)
 
@@ -158,6 +158,29 @@
 
 
 /*
+ * vbsc_hv_plxreset - notify VBSC that the hypervisor has requested
+ * a special reset due to PLX link training problems.  VBSC knows to
+ * do this quietly and prevent it from looping forever.
+ *
+ * %g1 plx link failure bitmask
+ * %g7 return address
+ *
+ * Called from setup environment
+ */
+	ENTRY_NP(vbsc_hv_plxreset)
+	mov	%g7, %o3
+
+	mov	%g1, %g2
+	setx	VBSC_HV_PLXRESET, %g3, %g1
+	mov	0, %g3
+	HVCALL(vbsc_send_polled)
+
+	mov	%o3, %g7
+	HVRET
+	SET_SIZE(vbsc_hv_plxreset)
+
+
+/*
  * vbsc_guest_start - notify VBSC that a guest has started
  *
  * %g7 return address
@@ -167,8 +190,9 @@
 	
 	setx	VBSC_GUEST_ON, %g2, %g1
 	GUEST_STRUCT(%o2)
-	set	GUEST_XID, %o4
+	set	GUEST_GID, %o4
 	ldx	[%o2 + %o4], %g2
+	add	%g2, XPID_GUESTBASE, %g2
 	mov	0, %g3
 	HVCALL(vbsc_send_polled)
 
@@ -187,8 +211,9 @@
 	ENTRY_NP(vbsc_guest_exit)
 	setx	VBSC_GUEST_OFF, %g2, %g1
 	GUEST_STRUCT(%o2)
-	set	GUEST_XID, %o4
+	set	GUEST_GID, %o4
 	ldx	[%o2 + %o4], %g2
+	add	%g2, XPID_GUESTBASE, %g2
 	ldx	[%o2 + GUEST_TOD_OFFSET], %g3
 	HVCALL(vbsc_send_polled)
 
@@ -207,8 +232,9 @@
 	ENTRY_NP(vbsc_guest_sir)
 	setx	VBSC_GUEST_RESET, %g2, %g1
 	GUEST_STRUCT(%o2)
-	set	GUEST_XID, %o4
+	set	GUEST_GID, %o4
 	ldx	[%o2 + %o4], %g2
+	add	%g2, XPID_GUESTBASE, %g2
 	ldx	[%o2 + GUEST_TOD_OFFSET], %g3
 	HVCALL(vbsc_send_polled)
 
@@ -228,8 +254,9 @@
 	ENTRY_NP(vbsc_guest_wdexpire)
 	mov	%g1, %g6
 	setx	VBSC_GUEST_WDEXPIRE, %g2, %g1
-	set	GUEST_XID, %g5
+	set	GUEST_GID, %g5
 	ldx	[%g6 + %g5], %g2
+	add	%g2, XPID_GUESTBASE, %g2
 	ldx	[%g6 + GUEST_TOD_OFFSET], %g3
 	ba,a	vbsc_send_polled ! tail call, returns to caller
 	SET_SIZE(vbsc_guest_wdexpire)
@@ -245,12 +272,17 @@
  * Clobbers %g1-6
  * Called from guest hcall environment
  */
+
+/* FIXME: Use a better buffer to send from ... */
+/* Better yet this function / operation goes away entirely for LDoms */
+
 	ENTRY_NP(vbsc_guest_tod_offset)
-	CPU_STRUCT(%g2)
+	VCPU_STRUCT(%g2)
 	inc	CPU_SCR0, %g2
 
-	set	GUEST_XID, %g3
+	set	GUEST_GID, %g3
 	ldx	[%g1 + %g3], %g3
+	add	%g3, XPID_GUESTBASE, %g3
 	stx	%g3, [%g2 + 0x8]
 
 	ldx	[%g1 + GUEST_TOD_OFFSET], %g3
@@ -395,7 +427,8 @@ hvcmd:
 	 * hvcmd_ping - nop, just respond
 	 */
 hvcmd_ping:
-	CPU_STRUCT(%g2)
+		/* FIXME: find better scratch buffer */
+	VCPU_STRUCT(%g2)
 	inc	CPU_SCR0, %g2
 	setx	VBSC_ACK(VBSC_CMD_HV, 'I'), %g4, %g3
 	stx	%g3, [%g2 + 0x0]
@@ -406,78 +439,203 @@ hvcmd_ping:
 	ba,pt	%xcc, svc_internal_send	! returns to caller!!!!
 	mov	16, %g3		! len
 
-
 /*
  * gueststatecmd - Request from VBSC to change guest state
  */
 gueststatecmd:
+	!! %g2 = incoming packet
+
 	ldub	[%g2 + 7], %g4
 	cmp	%g4, GUEST_STATE_CMD_SHUTREQ
-	be,pn	%xcc, hvcmd_guest_shutdown_request ! buf[1] = xid
+	be,pn	%xcc, 1f
+	cmp	%g4, GUEST_STATE_CMD_DCOREREQ
+	be,pn	%xcc, 1f
 	nop
 	ba,a	vbsc_rx_finished
 
+1:
 	/*
-	 * hvcmd_guest_shutdown_request - notify a guest to shutdown
+	 * The use of XID is deprecated. The target of
+	 * the request is always the control domain.
 	 */
-hvcmd_guest_shutdown_request:
-	ba,pt	%xcc, 1f
-	rd	%pc, %g3
-	.word	0, 0		!  8 xwords
-	.word	0, 0
-	.word	0, 0
-	.word	0, 0
-	.word	0, 0
-	.word	0, 0
-	.word	0, 0
-	.word	0, 0
-	.word	0		! extra 4 bytes for alignment
-1:	inc	7, %g3
-	andn	%g3, 0x7, %g3	! align
-
-
-	!! %g2 = packet
-	!! %g3 = sun4v erpt buffer
-
-#if 0
-	/*
-	 * Could check the XID against the current guest's XID
-	 * but what's the point?  There's only one guest.
-	 */
-	ldx	[%g2 + 0x8], %g4	! xid
-#endif
-
-	/*
-	 * Fill in the only additional data in this erpt, the
-	 * grace period before shutdown (seconds)
-	*/
-	ldx	[%g2 + 0x10], %g4 ! grace period in seconds
-	sth	%g4, [%g3 + ESUN4V_G_SECS]
-
-	/*
-	 * Fill in the generic parts of the erpt
-	 */
-	GEN_SEQ_NUMBER(%g4, %g5)
-	stx	%g4, [%g3 + ESUN4V_G_EHDL]
-
-	rd	STICK, %g4
-	stx	%g4, [%g3 + ESUN4V_G_STICK]
-
-	set	EDESC_WARN_RESUMABLE, %g4
-	stw	%g4, [%g3 + ESUN4V_EDESC]
-
-	set	(ERR_ATTR_MODE(ERR_MODE_UNKNOWN) | EATTR_SECS), %g4
-	stw	%g4, [%g3 + ESUN4V_ATTR]
-
-	stx	%g0, [%g3 + ESUN4V_RA]
-	stw	%g0, [%g3 + ESUN4V_SZ]
-	sth	%g0, [%g3 + ESUN4V_G_CPUID]
-
-	mov	%g3, %g2
-	CPU_STRUCT(%g1)
-	ba,pt	%xcc, queue_resumable_erpt ! tail call, returns to caller
+	CTRL_DOMAIN(%g1, %g3, %g4)
+	cmp	%g1, 0
+	be,pn	%xcc, vbsc_rx_finished
 	nop
 
+	/*
+	 * Check if the current vcpu is in the control
+	 * domain and running. If so, the state command
+	 * can be executed on the local strand.
+	 */
+	VCPU_STRUCT(%g3)
+
+	!! %g1 = control domain guestp
+	!! %g2 = incoming packet
+	!! %g3 = current vcpup
+
+	ldx	[%g3 + CPU_GUEST], %g4
+	cmp	%g1, %g4
+	bne,pn	%xcc, reroutecmd
+	nop
+
+	ldx	[%g3 + CPU_STATUS], %g4
+	cmp	%g4, CPU_STATE_RUNNING
+	bne,pn	%xcc, reroutecmd
+	nop
+
+	ba,a	executecmd
+
+reroutecmd:
+
+	!! %g1 = control domain guestp
+	!! %g2 = incoming packet
+
+	/*
+	 * Loop through the vcpus in the control domain
+	 * until one is found that is running. If none
+	 * are found, the domain is not in an appropriate
+	 * state for the request so the request is dropped.
+	 */
+
+	mov	0, %g4
+	!! %g4 = current index
+1:
+	cmp	%g4, (NVCPUS - 1)
+	bgu,pn	%xcc, vbsc_rx_finished	! no appropriate vcpu, ignore request
+	nop
+	sllx	%g4, GUEST_VCPUS_SHIFT, %g3
+	add	%g1, %g3, %g3
+	add	%g3, GUEST_VCPUS, %g3
+	ldx	[%g3], %g3
+	brz,a	%g3, 1b			! skip any empty entries
+	  inc	%g4
+	!! %g3 = current vcpup
+
+	! check the vcpu state
+	ldx	[%g3 + CPU_STATUS], %g5
+	cmp	%g5, CPU_STATE_RUNNING
+	bne,a	%xcc, 1b
+	  inc	%g4
+
+executecmd:
+
+	!! %g2 = incoming packet
+	!! %g3 = target vcpup
+
+	VCPU2STRAND_STRUCT(%g3, %g4)
+	!! %g4 = target strandp
+
+	ldub	[%g2 + 7], %g5
+	cmp	%g5, GUEST_STATE_CMD_SHUTREQ
+	be,pn	%xcc, hvcmd_guest_shutdown_request
+	cmp	%g5, GUEST_STATE_CMD_DCOREREQ
+	be,pn	%xcc, hvcmd_guest_dcore_request
+	nop
+	ba,a	vbsc_rx_finished
+
+hvcmd_guest_shutdown_request:
+
+	!! %g2 = incoming packet
+	!! %g3 = target vcpup
+	!! %g4 = target strandp
+
+#ifdef DEBUG
+	mov	%g7, %g5
+	PRINT("Control Domain shutdown request, target strand=0x")
+	ldub	[%g4 + STRAND_ID], %g6
+	PRINTX(%g6)
+	PRINT("\r\n")
+	mov	%g5, %g7
+#endif /* DEBUG */
+
+	! retrieve the command argument from the packet
+	ldx	[%g2 + 0x10], %g2
+	!! %g2 = command argument (grace period in seconds)
+	
+	/*
+	 * Perform the action locally if the current
+	 * strand is the specified target.
+	 */
+
+	STRAND_STRUCT(%g5)
+	cmp	%g4, %g5
+	be,a,pt	%xcc, guest_shutdown	! tail call, does not return here
+	  mov	%g2, %g1		! the required argument
+
+	/*
+	 * Send a mondo to the specified strand to
+	 * perform the action.
+	 */
+
+	add	%g4, STRAND_HV_TXMONDO, %g5
+	!! %g5 = strand mondop
+
+	! setup mondo structure
+	mov	HXCMD_GUEST_SHUTDOWN, %g6
+	stx	%g6, [%g5 + HVM_CMD]
+	STRAND_STRUCT(%g6)
+	stx	%g6, [%g5 + HVM_FROM_STRANDP]
+	stx	%g3, [%g5 + HVM_ARGS + HVM_GUESTCMD_VCPUP]
+	stx	%g2, [%g5 + HVM_ARGS + HVM_GUESTCMD_ARG]
+
+	! send the mondo
+	mov	%g4, %g1	! arg1 = target strandp
+	mov	%g5, %g2	! arg2 = strand mondop
+	STRAND_PUSH(%g7, %g3, %g4)
+	HVCALL(hvmondo_send)
+	STRAND_POP(%g7, %g3)
+
+	ba,a	vbsc_rx_finished
+
+hvcmd_guest_dcore_request:
+
+	!! %g2 = incoming packet
+	!! %g3 = target vcpup
+	!! %g4 = target strandp
+
+#ifdef DEBUG
+	mov	%g7, %g5
+	PRINT("Control Domain panic request, target strand=0x")
+	ldub	[%g4 + STRAND_ID], %g6
+	PRINTX(%g6)
+	PRINT("\r\n")
+	mov	%g5, %g7
+#endif /* DEBUG */
+
+	/*
+	 * Perform the action locally if the current
+	 * strand is the specified target.
+	 */
+
+	STRAND_STRUCT(%g5)
+	cmp	%g4, %g5
+	be,a,pt	%xcc, guest_panic	! tail call, does not return here
+	  nop
+
+	/*
+	 * Send a mondo to the specified strand to
+	 * perform the action.
+	 */
+
+	add	%g4, STRAND_HV_TXMONDO, %g5
+	!! %g5 = strand mondop
+
+	! setup mondo structure
+	mov	HXCMD_GUEST_PANIC, %g6
+	stx	%g6, [%g5 + HVM_CMD]
+	STRAND_STRUCT(%g6)
+	stx	%g6, [%g5 + HVM_FROM_STRANDP]
+	stx	%g3, [%g5 + HVM_ARGS + HVM_GUESTCMD_VCPUP]
+
+	! send the mondo
+	mov	%g4, %g1	! arg1 = target strandp
+	mov	%g5, %g2	! arg2 = strand mondop
+	STRAND_PUSH(%g7, %g3, %g4)
+	HVCALL(hvmondo_send)
+	STRAND_POP(%g7, %g3)
+
+	ba,a	vbsc_rx_finished
 
 	/*
 	 * dbgrd - perform read transaction on behalf of vbsc
@@ -558,25 +716,26 @@ dbgwr:
 	 * dbg_send_error - send a fake error transaction back to vbsc
 	 */
 dbg_send_error:
+#if 0
 #ifdef DEBUG
 	/*
 	 * Fill the error reports with valid information to
 	 * help test interaction with the FERG on the vbsc
 	 */
 	mov	%g7, %g6
-	CPU_STRUCT(%g3)
-	add	%g3, CPU_CE_RPT + CPU_VBSC_ERPT, %g4
+	STRAND_STRUCT(%g3)
+	add	%g3, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g4
 	SIM_IRC_DIAG_ERPT(%g4, %g5, %g7)
-	add	%g3, CPU_UE_RPT + CPU_VBSC_ERPT, %g4
+	add	%g3, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g4
 	SIM_IRU_DIAG_ERPT(%g4, %g5, %g7)
 	PRINT("\r\n")
 	mov	%g6, %g7
 #endif
 
 	CPU_PUSH(%g7, %g1, %g2, %g3)
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_CE_RPT + CPU_UNSENT_PKT, %g2
-	ldx	[%g1 + CPU_ROOT], %g6 	
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_CE_RPT + STRAND_UNSENT_PKT, %g2
+	ldx	[%g1 + STRAND_CONFIGP], %g6 	
 
 #ifdef DEBUG
 	/*
@@ -585,18 +744,18 @@ dbg_send_error:
 	 */
 	mov	1, %g7
 	stx	%g7, [%g6 + CONFIG_ERRS_TO_SEND]
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g3
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g3
 	add	%g1, %g3, %g3
 	stx	%g7, [%g3]
 #endif
-	add	%g1, CPU_CE_RPT + CPU_VBSC_ERPT, %g1
+	add	%g1, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g1
 	mov	EVBSC_SIZE, %g3
 	HVCALL(send_diag_erpt)
 	CPU_POP(%g7, %g1, %g2, %g3)
+#endif
 	HVRET
 	SET_SIZE(vbsc_rx)
 
- 
 /*
  * vbsc_tx
  *
@@ -615,26 +774,69 @@ dbg_send_error:
 	SET_SIZE(vbsc_tx)
 
  
-#define	r_tmp1	%l0
-#define	r_tmp2	%l1
-#define	r_tmp3	%l2
-#define	r_tmp4	%l3
-#define	r_return %l7
-	! We own the entire machine..
-	ENTRY(svc_vbsc_init)
-	mov	%g7, r_return
-	add	%i0, CONFIG_VBSC_DBGERROR, %g1
-	SVC_REGISTER(debugt, XPID_HV, SID_VBSC_CTL, vbsc_rx, vbsc_tx)
-	brz,a,pn %g1, hvabort
-	  mov	ABORT_VBSC_REGISTER, %g1
-	stx	%g1, [%i0 + CONFIG_VBSC_SVCH]
-	jmp	r_return + 4
-	nop
-	SET_SIZE(svc_vbsc_init)
-#undef	r_tmp1
-#undef	r_tmp2
-#undef	r_tmp3
-#undef	r_tmp4
-#undef	r_return
 
-#endif /*  CONFIG_SVC && CONFIG_DEBUGSVC  */
+
+/*
+ * vbsc_puts - print string on hypervisor console
+ *
+ * %g1 string pointer
+ * %g7 return address
+ */
+	ENTRY_NP(vbsc_puts)
+
+        CPU_PUSH(%g7, %g2, %g3, %g4)
+        CPU_PUSH(%g6, %g2, %g3, %g4)
+        CPU_PUSH(%g5, %g2, %g3, %g4)
+        CPU_PUSH(%l0, %g2, %g3, %g4)
+
+        mov     %g1, %l0
+        !! %l0 = string pointer
+
+1:      mov     8, %g5
+        mov     0, %g2
+        !! %g5 = loop count
+        !! %g2 = debug-puthex arg1
+
+2:      ldub    [%l0], %g3
+        brz,pn  %g3, .sendndone
+          nop
+        sllx    %g2, 8, %g2
+        or      %g2, %g3, %g2   ! arg1 = (arg1 << 8) | char
+        deccc   %g5
+        bnz,pt  %xcc, 2b
+          inc     %l0
+
+3:
+        setx    VBSC_HV_PUTCHARS, %g3, %g1
+        HVCALL(vbsc_send_polled)
+
+        ba,pt   %xcc, 1b
+          nop
+
+.sendndone:
+        setx    VBSC_HV_PUTCHARS, %g3, %g1
+        HVCALL(vbsc_send_polled)
+
+        CPU_POP(%l0, %g1, %g2, %g3)
+        CPU_POP(%g5, %g1, %g2, %g3)
+        CPU_POP(%g6, %g1, %g2, %g3)
+        CPU_POP(%g7, %g1, %g2, %g3)
+
+	HVRET
+	SET_SIZE(vbsc_puts)
+
+
+/*
+ * vbsc_putx - print hex number on hypervisor console
+ *
+ * %g1 number
+ * %g7 return address
+ */
+	ENTRY_NP(vbsc_putx)
+	mov	%g1, %g2
+	setx	VBSC_HV_PUTHEX, %g3, %g1
+	ba,a	vbsc_send_polled
+	/* tail call, returns directly to caller */
+	SET_SIZE(vbsc_putx)
+
+#endif /* CONFIG_SVC && CONFIG_VBSC_SVC  */

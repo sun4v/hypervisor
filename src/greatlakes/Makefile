@@ -40,14 +40,14 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.3	06/04/26 SMI"
+# ident	"@(#)Makefile	1.4	07/05/03 SMI"
 #
 
 TOP = ..
 
-SUBDIRS = ontario
+SUBDIRS = huron ontario
 
 include $(TOP)/Makefile.master

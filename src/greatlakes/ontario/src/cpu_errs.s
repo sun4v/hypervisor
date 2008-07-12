@@ -42,13 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)cpu_errs.s	1.66	06/05/30 SMI"
-
-	.file	"cpu_errs.s"
+	.ident	"@(#)cpu_errs.s	1.82	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -68,8 +66,8 @@
 
 #include <offsets.h>
 #include <cyclic.h>
-#include <cpu.h>
 #include <guest.h>
+#include <strand.h>
 #include <config.h>
 #include <cpu_errs.h>
 #include <errs_common.h>
@@ -77,6 +75,9 @@
 #include <debug.h>
 #include <cpu_errs_defs.h>
 #include <abort.h>
+#include <iob.h>
+#include <jbi_regs.h>
+#include <util.h>
 
 
 /*
@@ -93,9 +94,9 @@
  */
 /* BEGIN CSTYLED */
 #define	ASMCALL_DUMP_L2_DATA_FOR_CE(arg1, arg2, scr1, ret7)		\
-	CPU_STRUCT(scr1)						;\
-	add	scr1, CPU_CE_RPT, arg2	/* set %g2 to ce_rpt pointer */	;\
-	add	arg2, CPU_EVBSC_L2_AFAR(0), arg1			;\
+	STRAND_STRUCT(scr1)						;\
+	add	scr1, STRAND_CE_RPT, arg2	/* set %g2 to ce_rpt pointer */	;\
+	add	arg2, STRAND_EVBSC_L2_AFAR(0), arg1			;\
 	ldx	[arg1], arg1		/* %g1 has physical address */	;\
 	ba	dump_l2_set_tag_data_ecc				;\
 	rd	%pc, ret7
@@ -103,7 +104,7 @@
 
 /* BEGIN CSTYLED */
 #define	SET_CPU_IN_ERROR(scr1, scr2)					\
-	CPU_STRUCT(scr1)						;\
+	VCPU_STRUCT(scr1)	/* FIXME: or strand? */						;\
 	mov	CPU_STATE_ERROR, scr2					;\
 	stx	scr2, [scr1 + CPU_STATUS]
 /* END CSTYLED */
@@ -114,9 +115,9 @@
 /* BEGIN CSTYLED */
 #define	ASMCALL_RQ_ERPT(E_OFFT, reg1, reg2, reg3, reg4, reg5, reg6, reg7)\
 	PRINT("queue RESUMABLE\r\n")					;\
-	CPU_STRUCT(reg1)						;\
+	STRAND_STRUCT(reg1)						;\
 	add	reg1, E_OFFT, reg2		/* erpt buf ptr */	;\
-	ba	queue_resumable_erpt  /* %g1 = cpu, %g2 = erpt */	;\
+	ba	queue_resumable_erpt  /* %g1 = strand, %g2 = erpt */	;\
 	rd	%pc, reg7
 /* END CSTYLED */
 
@@ -125,7 +126,7 @@
  * print routines. The second argument, reg1, should be %g1, which is
  * used as the argument to PRINTX.
  * Arguments:
- *	%g6 - as erpt - pointer to the cpu error buffer
+ *	%g6 - as erpt - pointer to the strand error buffer
  *	%g1 - as reg1
  * all registers are used.
  */
@@ -133,125 +134,129 @@
 /* BEGIN CSTYLED */
 #define	CONSOLE_PRINT_DIAG_ERPT(erpt, reg1)				\
 	PRINT("ehdl = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_EHDL], reg1   /* ehdl */	;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_EHDL], reg1   /* ehdl */	;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("stick = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_STICK], reg1  /* stick */	;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_STICK], reg1  /* stick */	;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("cpuver = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_CPUVER], reg1 /* cpuver */;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_CPUVER], reg1 /* cpuver */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("sparc_afsr = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR], reg1	/* sparc afsr */;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR], reg1	/* sparc afsr */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("sparc_afar = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], reg1	/* sparc afar */;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], reg1	/* sparc afar */;\
+	PRINTX(reg1)							;\
+	PRINT("\r\n")							;\
+	PRINT("jbus_err_log = ")					;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG], reg1	;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("L2 ESRs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(1)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(1)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(2)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(2)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(3)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(3)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("L2 EARs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(1)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(1)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(2)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(2)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(3)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(3)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("DRAM ESRs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(1)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(1)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(2)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(2)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(3)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(3)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("DRAM EARs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(1)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(1)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(2)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(2)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(3)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(3)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("DRAM ELRs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_DRAM_LOC(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_LOC(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_LOC(1)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_LOC(1)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_LOC(2)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_LOC(2)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_LOC(3)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_LOC(3)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("DRAM ECRs\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_DRAM_CNTR(0)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_CNTR(0)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_CNTR(1)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_CNTR(1)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT("  ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_CNTR(2)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_CNTR(2)], reg1			;\
 	PRINTX(reg1)							;\
 	PRINT(" ")							;\
-	ldx	[erpt + CPU_EVBSC_DRAM_CNTR(3)], reg1 			;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_CNTR(3)], reg1 			;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("tstate = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_TSTATE], reg1 /* tstate */;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_TSTATE], reg1 /* tstate */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("htstate = ")						;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_HTSTATE], reg1 /* htstate */;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_HTSTATE], reg1 /* htstate */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("tpc = ")							;\
-	ldx	[erpt + CPU_VBSC_ERPT + EVBSC_TPC], reg1     /* tpc */	;\
+	ldx	[erpt + STRAND_VBSC_ERPT + EVBSC_TPC], reg1     /* tpc */	;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("cpuid = ")						;\
-	lduh	[erpt + CPU_VBSC_ERPT + EVBSC_CPUID], reg1   /* cpuid */;\
+	lduh	[erpt + STRAND_VBSC_ERPT + EVBSC_CPUID], reg1   /* cpuid */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("TT = ")							;\
-	lduh	[erpt + CPU_VBSC_ERPT + EVBSC_TT], reg1		/* tt */;\
+	lduh	[erpt + STRAND_VBSC_ERPT + EVBSC_TT], reg1		/* tt */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("TL = ")							;\
-	ldub	[erpt + CPU_VBSC_ERPT + EVBSC_TL], reg1		/* tl */;\
+	ldub	[erpt + STRAND_VBSC_ERPT + EVBSC_TL], reg1		/* tl */;\
 	PRINTX(reg1)							;\
 	PRINT("\r\n")							;\
 	PRINT("------END-------\r\n")
@@ -285,16 +290,15 @@
 	 *  g1-3 = scratch
 	 *  g4-6 : preserved across PRINT* macros
 	 *  g5 : error report pointer
-	 *  g6 : cpu struct pointer
+	 *  g6 : strand struct pointer
 	 */
 	ENTRY_NP(ce_poll_entry)	/* entry point for the error daemon */
-						! %g6->cpu
-	stx	%g7, [%g6 + CPU_ERR_RET]	! save return address
+	stx	%g7, [%g6 + STRAND_ERR_RET]	! save return address
 
 	ENTRY_NP(ce_err)
 
-	/* get cpu, CE buffer in %g6-5, they are safe across calls */
-	CPU_ERPT_STRUCT(CPU_CE_RPT, %g6, %g5)	! g6->cpu, g5->cpu.ce_rpt
+	/* get strand, CE buffer in %g6-5, they are safe across calls */
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, %g6, %g5)	! g6->strand, g5->strand.ce_rpt
 
 	! get the lock
 	SPINLOCK_ENTER_ERRORLOCK(%g1, %g2, %g3)
@@ -322,13 +326,14 @@
 
 	stxa	%g4, [%g0]ASI_SPARC_ERR_STATUS	! clear everything seen
 
-	stx	%g4, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR]	! save afsr
-	stx	%g3, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR]	! save afar
+	stx	%g4, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR]	! save afsr
+	stx	%g3, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR]	! save afar
+	stx	%g0, [%g5 + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG]
 
 	/*
 	 * Check to see if there is any error to process
 	 */
-	CE_CHECK(%g6, %g4, %g1, %g2, %g3)	! cpup, spesr,
+	CE_CHECK(%g6, %g4, %g1, %g2, %g3)	! strand, spesr,
 	bz,a	%xcc, .ce_unlock_exit		! none: exit
 	  nop
 
@@ -343,7 +348,7 @@
 	! can be sent to the SC or diagnosis service provider
 
 	!! %g5 -> ce_rpt
-	!! %g6 -> cpu
+	!! %g6 -> strand
 
 	! XXX check for TL saturation - why do this for CEs?
 	! Too drastic to watchdog reset a guest on a corrected error!
@@ -354,9 +359,9 @@
 #ifdef DEBUG
 	.pushlocals
 	setx	0xdeadbeefdeadbeef,%g3, %g4
-	set	CPU_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
+	set	STRAND_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
 1:	stx	%g4, [%g5 + %g3]
-	cmp	%g3, CPU_VBSC_ERPT + EVBSC_DIAG_BUF
+	cmp	%g3, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF
 	bgu,pt	%xcc, 1b
 	dec	8, %g3
 	.poplocals
@@ -365,9 +370,9 @@
 	/*
 	 * At this point we now look for the specific errors:
 	 */
-	lduw	[%g6 + CPU_ERR_FLAG], %g3
+	lduw	[%g6 + STRAND_ERR_FLAG], %g3
 	btst	ERR_FLAG_SPARC, %g3		! blackout?
-	ldx	[%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR], %g3 ! sparc status
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR], %g3 ! sparc status
 	bnz	%xcc, .ce_check_l2		!   yes: check l2 dram
 
 	set	SPARC_CE_BITS, %g4
@@ -424,7 +429,7 @@
 .ce_irc_err:
 	PRINT("IRC DIAG\r\n")
 	! set up %g1 as first arg to irc_check()
-	ldx	[%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! arg1 = EAR
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! arg1 = EAR
 	HVCALL(irc_check)			! %g2 is return value
 	cmp	%g2, RF_TRANSIENT
 	be	1f				! transient IRC
@@ -450,28 +455,26 @@
  */
 .ce_itc_err:	/* Tag */
 	PRINT("ITC DIAG\r\n")
-	DUMP_ICACHE_INFO(CPU_CE_RPT, %g1, %g5, %g3, %g4, %g2, %g6, %g7)
+	DUMP_ICACHE_INFO(STRAND_CE_RPT, %g1, %g5, %g3, %g4, %g2, %g6, %g7)
 	ba,a	.ce_send_sparc_erpt
 
 .ce_idc_err:
 	PRINT("IDC DIAG\r\n")
-	DUMP_ICACHE_INFO(CPU_CE_RPT, %g1, %g5, %g3, %g4, %g2, %g6, %g7)
+	DUMP_ICACHE_INFO(STRAND_CE_RPT, %g1, %g5, %g3, %g4, %g2, %g6, %g7)
 	ba,a	.ce_send_sparc_erpt
-
-
 
 /*
  * L1 Data Cache:
  */
 .ce_dtc_err:	/* Tag */
 	PRINT("DTC DIAG\r\n")
-	DUMP_DCACHE_INFO(CPU_CE_RPT, %g6, %g5, %g1, %g2, %g3, %g4, %g7)
+	DUMP_DCACHE_INFO(STRAND_CE_RPT, %g6, %g5, %g1, %g2, %g3, %g4, %g7)
 	ba,a	.ce_send_sparc_erpt
 
 
 .ce_ddc_err:	/* Data */
 	PRINT("DDC DIAG\r\n")
-	DUMP_DCACHE_INFO(CPU_CE_RPT, %g6, %g5, %g1, %g2, %g3, %g4, %g7)
+	DUMP_DCACHE_INFO(STRAND_CE_RPT, %g6, %g5, %g1, %g2, %g3, %g4, %g7)
 	ba,a	.ce_send_sparc_erpt
 /*
  * Float Register Correctable:
@@ -479,7 +482,7 @@
 .ce_frc_err:
 	PRINT("FRC DIAG\r\n")
 	! set up %g1 as first arg to frc_check()
-	ldx	[%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
 	!! %g1 = EAR
 	HVCALL(frc_check)
 	!! %g2 = return value
@@ -506,12 +509,11 @@
 	 * Note: this path is taken also for "MEC only" and "nothing found".
 	 *       It will throttle "false" interrupts.
 	 */
-	CPU_STRUCT(%g6)				! g6 -> cpu
-	add	%g6, CPU_CE_RPT, %g5		! g5 -> cpu.ce_rpt
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_CE_RPT, %g5		! g5 -> strand.ce_rpt
 
 	set	ERR_SEND_DIAG, %g1
-	SET_CPU_RPTFLAGS(%g6, %g1)
-
+	SET_STRAND_RPTFLAGS(%g6, %g1)
 
 	/*
 	 * Storm Prevention:
@@ -520,16 +522,16 @@
 	 *   the group: SPARC Register File & L1$
 	 */
 .ce_sparc_storm:
-	lduw	[%g6 + CPU_ERR_FLAG], %g2
+	lduw	[%g6 + STRAND_ERR_FLAG], %g2
 	btst	ERR_FLAG_SPARC, %g2		! handler installed?
 	bnz,pn	%xcc, .ce_sparc_storm_done	!   yes
 
 	bset	ERR_FLAG_SPARC, %g2		!   no: set it
-	ldx	[%g6 + CPU_ROOT], %g1		! ->config
+	STRAND2CONFIG_STRUCT(%g6, %g1)		! ->configp
 	ldx	[%g1 + CONFIG_CE_BLACKOUT], %g1
 	brz,a,pn %g1, .ce_sparc_storm_done	! zero: blackout disabled
 	  nop
-	stw	%g2, [%g6 + CPU_ERR_FLAG]	! flag as installed
+	stw	%g2, [%g6 + STRAND_ERR_FLAG]	! flag as installed
 						! g1 = delta tick
 	HVCALL(err_set_sparc_bits)		! g2 = handler address
 	set	CEEN, %g3			! g3 = arg 0 : bit(s) to set
@@ -538,11 +540,10 @@
 .ce_sparc_storm_done:
 	ba,a	ce_err_ret
 
-
 	/*
 	 * L2DRAM Error Handling:
 	 */
-	/* g6->cpu, g5->ce_rpt */
+	/* g6->strand, g5->ce_rpt */
 .ce_check_l2:
 	/*
 	 * L2DRAM errors are global and may not be valid for this cpu.
@@ -561,29 +562,48 @@
 	CE_CHECK_L2_ESR(0, %g6, %g4, %g1, %g2)
 	bz	%xcc, .ce_check_l2_b1		! check next bank
 	nop
-	SET_CPU_L2BANK(0, %g6, %g7)		! save bank#
+	SET_STRAND_L2BANK(0, %g6, %g7)		! save bank#
 	! dump all of the l2 info. must pass the registers as is
-	DUMP_L2_SET_TAG_DATA(0, CPU_CE_RPT, %g6, %g5, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(0, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
 	! dram data here since all L2 esr need it
-	DUMP_DRAM_CONTENTS(0, CPU_CE_RPT, %g6, %g5, %g1, %g2)
-	ldx	[%g6 + CPU_CE_RPT + CPU_EVBSC_L2_AFSR(0)], %g4	! l2esr
-	/* 6->cpu  4=l2esr */
+	ldx	[%g6 + STRAND_CE_RPT + STRAND_EVBSC_L2_AFSR(0)], %g4	! l2esr
+	setx	L2_ESR_CE_NO_EAR_BITS, %g1, %g2
+	btst	%g4, %g2
+	bz,pn	%xcc, 1f
+	nop
+	CLEAR_DRAM_CONTENTS(0, STRAND_CE_RPT, %g6, %g5)
+	ba	2f
+	nop
+1:
+	DUMP_DRAM_CONTENTS(0, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
+2:
+	/* %g6->cpu  %g4=l2esr */
 	CLEAR_L2_ESR(0, %g4, %g1, %g2)
-	/* 6->cpu  4=l2esr */
+	/* 6->strand 4=l2esr */
 	PROCESS_CE_IN_L2_ESR(0, %g6, %g5, %g4, %g1, %g2, %g3)
-	/* 6->cpu  5->erpt  4=flags: action */
+	/* 6->strand 5->erpt  4=flags: action */
 	ba,a	.ce_l2_all
 
 .ce_check_l2_b1:
 	CE_CHECK_L2_ESR(1, %g6, %g4, %g1, %g2)
 	bz	%xcc, .ce_check_l2_b2		! check next bank
 	nop
-	SET_CPU_L2BANK(1, %g6, %g7)		! save bank#
+	SET_STRAND_L2BANK(1, %g6, %g7)		! save bank#
 	! dump all of the l2 info. must pass the registers as is
-	DUMP_L2_SET_TAG_DATA(1, CPU_CE_RPT, %g6, %g5, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(1, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
 	! dram data here since all L2 esr need it
-	DUMP_DRAM_CONTENTS(1, CPU_CE_RPT, %g6, %g5, %g1, %g2)
-	ldx	[%g6 + CPU_CE_RPT + CPU_EVBSC_L2_AFSR(1)], %g4
+	ldx	[%g6 + STRAND_CE_RPT + STRAND_EVBSC_L2_AFSR(1)], %g4	! l2esr
+	setx	L2_ESR_CE_NO_EAR_BITS, %g1, %g2
+	btst	%g4, %g2
+	bz,pn	%xcc, 1f
+	nop
+	CLEAR_DRAM_CONTENTS(0, STRAND_CE_RPT, %g6, %g5)
+	ba	2f
+	nop
+1:
+	DUMP_DRAM_CONTENTS(1, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
+2:
+	/* %g6->cpu  %g4=l2esr */
 	CLEAR_L2_ESR(1, %g4, %g1, %g2)
 	PROCESS_CE_IN_L2_ESR(1, %g6, %g5, %g4, %g1, %g2, %g3)
 	ba,a	.ce_l2_all
@@ -592,12 +612,22 @@
 	CE_CHECK_L2_ESR(2, %g6, %g4, %g1, %g2)
 	bz	%xcc, .ce_check_l2_b3		! check next bank
 	nop
-	SET_CPU_L2BANK(2, %g6, %g7)		! save bank#
+	SET_STRAND_L2BANK(2, %g6, %g7)		! save bank#
 	! dump all of the l2 info. must pass the registers as is
-	DUMP_L2_SET_TAG_DATA(2, CPU_CE_RPT, %g6, %g5, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(2, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
 	! dram data here since all L2 esr need it
-	DUMP_DRAM_CONTENTS(2, CPU_CE_RPT, %g6, %g5, %g1, %g2)
-	ldx	[%g6 + CPU_CE_RPT + CPU_EVBSC_L2_AFSR(2)], %g4
+	ldx	[%g6 + STRAND_CE_RPT + STRAND_EVBSC_L2_AFSR(2)], %g4	! l2esr
+	setx	L2_ESR_CE_NO_EAR_BITS, %g1, %g2
+	btst	%g4, %g2
+	bz,pn	%xcc, 1f
+	nop
+	CLEAR_DRAM_CONTENTS(0, STRAND_CE_RPT, %g6, %g5)
+	ba	2f
+	nop
+1:
+	DUMP_DRAM_CONTENTS(2, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
+2:
+	/* %g6->cpu  %g4=l2esr */
 	CLEAR_L2_ESR(2, %g4, %g1, %g2)
 	PROCESS_CE_IN_L2_ESR(2, %g6, %g5, %g4, %g1, %g2, %g3)
 	ba,a	.ce_l2_all
@@ -606,12 +636,22 @@
 	CE_CHECK_L2_ESR(3, %g6, %g4, %g1, %g2)
 	bz	%xcc, .ce_no_error
 	nop
-	SET_CPU_L2BANK(3, %g6, %g7)		! save bank#
+	SET_STRAND_L2BANK(3, %g6, %g7)		! save bank#
 	! dump all of the l2 info. must pass the registers as is
-	DUMP_L2_SET_TAG_DATA(3, CPU_CE_RPT, %g6, %g5, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(3, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
 	! dram data here since all L2 esr need it
-	DUMP_DRAM_CONTENTS(3, CPU_CE_RPT, %g6, %g5, %g1, %g2)
-	ldx	[%g6 + CPU_CE_RPT + CPU_EVBSC_L2_AFSR(3)], %g4
+	ldx	[%g6 + STRAND_CE_RPT + STRAND_EVBSC_L2_AFSR(3)], %g4	! l2esr
+	setx	L2_ESR_CE_NO_EAR_BITS, %g1, %g2
+	btst	%g4, %g2
+	bz,pn	%xcc, 1f
+	nop
+	CLEAR_DRAM_CONTENTS(0, STRAND_CE_RPT, %g6, %g5)
+	ba	2f
+	nop
+1:
+	DUMP_DRAM_CONTENTS(3, STRAND_CE_RPT, %g6, %g5, %g1, %g2)
+2:
+	/* %g6->cpu  %g4=l2esr */
 	CLEAR_L2_ESR(3, %g4, %g1, %g2)
 	PROCESS_CE_IN_L2_ESR(3, %g6, %g5, %g4, %g1, %g2, %g3)
 	ba,a	.ce_l2_all
@@ -619,8 +659,7 @@
 .ce_l2_all:
 	brlz	%g4, .ce_no_error		! no error found - exit now
 	nop
-	SET_CPU_RPTFLAGS(%g6, %g4)
-
+	SET_STRAND_RPTFLAGS(%g6, %g4)
 
 	/*
 	 * Storm Prevention:
@@ -637,22 +676,22 @@
 	 * Only one will get through this set successfully.
 	 */
 .ce_l2dram_storm:
-	GET_CPU_L2BANK(%g6, %g4)
+	GET_STRAND_L2BANK(%g6, %g4)
 	BCLR_L2_BANK_EEN(%g4, CEEN, %g1, %g2)	! g4 = bank#
 	bz	%xcc, .ce_l2dram_storm_done	! already disabled
 	nop
 	mov	ERR_FLAG_L2DRAM, %g1		! L2DRAM flag
 	sll	%g1, %g4, %g1			! << bank#
-	lduw	[%g6 + CPU_ERR_FLAG], %g2	! installed flags
+	lduw	[%g6 + STRAND_ERR_FLAG], %g2	! installed flags
 	btst	%g1, %g2			! handler installed?
 	bnz,pn	%xcc, .ce_l2dram_storm_done	!   yes
 
 	bset	%g1, %g2			!   no: set it
-	ldx	[%g6 + CPU_ROOT], %g1		! ->config
+	STRAND2CONFIG_STRUCT(%g6, %g1)		! ->configp
 	ldx	[%g1 + CONFIG_CE_BLACKOUT], %g1
 	brz,a,pn %g1, .ce_l2dram_storm_done	! zero: blackout disabled
 	  nop
-	stw	%g2, [%g6 + CPU_ERR_FLAG]	! handler installed
+	stw	%g2, [%g6 + STRAND_ERR_FLAG]	! handler installed
 						! g1 = delta tick
 	HVCALL(err_set_l2_bits)			! g2 = handler address
 	mov	CEEN, %g3			! g3 = arg 0 : bit(s) to set
@@ -661,24 +700,22 @@
 .ce_l2dram_storm_done:
 	ba,a	ce_err_ret
 
-
 	ENTRY_NP(ce_err_ret)
 
-	CPU_STRUCT(%g6)				! g6 -> cpu
-	GET_CPU_RPTFLAGS(%g6, %g4)		! g4: flags: action
+	STRAND_STRUCT(%g6)
+	GET_STRAND_RPTFLAGS(%g6, %g4)		! g4: flags: action
 
 	btst	ERR_SEND_DIAG, %g4		! send diag report?
 	bz	%xcc, .ce_unlock_exit		!   no
 	nop
 	! send CE diag report
-	add	%g6, CPU_CE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	add	%g6, CPU_CE_RPT + CPU_UNSENT_PKT, %g2	! erpt.unsent flag
+	add	%g6, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	add	%g6, STRAND_CE_RPT + STRAND_UNSENT_PKT, %g2	! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3			! size
 	HVCALL(send_diag_erpt)			! g4-6 clobbered
-	CPU_STRUCT(%g6)				! g6 -> cpu
-	SET_CPU_RPTFLAGS(%g6, %g0)		! clear report flags
+	STRAND_STRUCT(%g6)
+	SET_STRAND_RPTFLAGS(%g6, %g0)		! clear report flags
 	ba,a	.ce_unlock_exit		! handler epilogue
-
 
 	! XXX CEs should never watchdog_reset a guest???
 	! XXX It should also not inadvertently let a guest run at TL > MAXPTL
@@ -716,9 +753,9 @@
 	ba,a	.ce_exit			! exit now
 
 .ce_exit:
-	ldx	[%g6 + CPU_ERR_RET], %g7	! get return address
+	ldx	[%g6 + STRAND_ERR_RET], %g7	! get return address
 	brnz,a	%g7, .ce_return			!   valid: clear it & return
-	  stx	%g0, [%g6+ CPU_ERR_RET]		!           ..
+	  stx	%g0, [%g6+ STRAND_ERR_RET]		!           ..
 	SET_SIZE(ce_poll_entry)
 						! NULL: return from interrupt
 	retry					! return from CE interrupt
@@ -747,8 +784,8 @@
 	bnz,pn	%xcc, .fatal_reset_dbu		!  yes: bail now
 	nop
 
-	/* get cpu, CE buffer in %g6-5, they are safe across calls */
-	CPU_ERPT_STRUCT(CPU_CE_RPT, %g6, %g5)	! g6->cpu, g5->cpu.ce_rpt
+	/* get strand, CE buffer in %g6-5, they are safe across calls */
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, %g6, %g5)	! g6->strand, g5->strand.ce_rpt
 
 	/*
 	 * We do not idle all strands if the scrubber got a UE
@@ -766,11 +803,10 @@
 
 .dis_ue_no_idle:
 
-	lduw	[%g6 + CPU_ERR_FLAG], %g2	! installed flags
+	lduw	[%g6 + STRAND_ERR_FLAG], %g2	! installed flags
 	bclr	ERR_FLAG_STRANDS_NOT_IDLED, %g2	! reset STRANDS_IDLED
 	or	%g2, %g1, %g2
-	stw	%g2, [%g6 + CPU_ERR_FLAG]	!	..
-
+	stw	%g2, [%g6 + STRAND_ERR_FLAG]	!	..
 
 	PRINT("DATA ERR\r\n")
 	CONSOLE_PRINT_ESRS(%g1, %g2, %g3, %g4)
@@ -790,9 +826,10 @@
 	stxa	%g4, [%g0]ASI_SPARC_ERR_STATUS	! clear SPARC afsr
 
 	! save ce_rpt.sparc_afsr
-	stx	%g4, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR]
+	stx	%g4, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR]
 	! save ce_rpt.sparc_afar
-	stx	%g3, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR]
+	stx	%g3, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR]
+	stx	%g0, [%g5 + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG]
 
 	/*
 	 * Generate a basic error report
@@ -801,22 +838,22 @@
 	 */
 	LOAD_BASIC_ERPT(%g6, %g5, %g1, %g2)
 
-	mov	%g6, %g1			! cpu
-	mov	%g5, %g2			! cpu.ue_erpt
+	mov	%g6, %g1			! strand
+	mov	%g5, %g2			! strand.ue_erpt
 
 #ifdef DEBUG
 	.pushlocals
 	setx	0xdeadbeefdeadbeef,%g3, %g4
-	set	CPU_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
+	set	STRAND_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
 1:	stx	%g4, [%g5 + %g3]
-	cmp	%g3, CPU_VBSC_ERPT + EVBSC_DIAG_BUF
+	cmp	%g3, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF
 	bgu,pt	%xcc, 1b
 	dec	8, %g3
 	.poplocals
 #endif
 	! check for MAU error
 	/* Dump the L2 and DRAM registers also */
-	! %g1 has cpu pointer, %g2 has &ce_rpt - pointer to error report
+	! %g1 has strand pointer, %g2 has &ce_rpt - pointer to error report
 	DUMP_L2_DRAM_ERROR_LOGS(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 
 	! go through each L2 bank and check for valid UE bits
@@ -825,13 +862,13 @@
 	bz	%xcc, .dis_ue_check_l2_b1		! check next bank
 	nop
 	/* save the state of the line */
-	SAVE_L2_LINE_STATE(0, CPU_CE_RPT, %g1, %g2)
-	!! %g1= cpup
+	SAVE_L2_LINE_STATE(0, STRAND_CE_RPT, %g1, %g2)
+	!! %g1= strand
 	!! %g2 = erpt
-	DUMP_L2_SET_TAG_DATA(0, CPU_CE_RPT, %g1, %g2, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(0, STRAND_CE_RPT, %g1, %g2, %g1, %g2)
 	!! %g1 = cpu
 	!! %g2 = cpu.erpt
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(0)], %g4	! l2esr
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(0)], %g4	! l2esr
 	CLEAR_L2_ESR(0, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_DIS_UE_IN_L2_ESR(0, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.dis_ue_err_ret, .ue_resume_exit)
@@ -841,11 +878,11 @@
 	bz	%xcc, .dis_ue_check_l2_b2		! check next bank
 	nop
 	/* save the state of the line */
-	SAVE_L2_LINE_STATE(1, CPU_CE_RPT, %g1, %g2)
-	!! %g1= cpup
+	SAVE_L2_LINE_STATE(1, STRAND_CE_RPT, %g1, %g2)
+	!! %g1= strand
 	!! %g2 = erpt
-	DUMP_L2_SET_TAG_DATA(1, CPU_CE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(1)], %g4	! l2esr
+	DUMP_L2_SET_TAG_DATA(1, STRAND_CE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(1)], %g4	! l2esr
 	CLEAR_L2_ESR(1, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_DIS_UE_IN_L2_ESR(1, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.dis_ue_err_ret, .ue_resume_exit)
@@ -855,11 +892,11 @@
 	bz	%xcc, .dis_ue_check_l2_b3		! check next bank
 	nop
 	/* save the state of the line */
-	SAVE_L2_LINE_STATE(2, CPU_CE_RPT, %g1, %g2)
-	!! %g1= cpup
+	SAVE_L2_LINE_STATE(2, STRAND_CE_RPT, %g1, %g2)
+	!! %g1= strand
 	!! %g2 = erpt
-	DUMP_L2_SET_TAG_DATA(2, CPU_CE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(2)], %g4	! l2esr
+	DUMP_L2_SET_TAG_DATA(2, STRAND_CE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(2)], %g4	! l2esr
 	CLEAR_L2_ESR(2, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_DIS_UE_IN_L2_ESR(2, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.dis_ue_err_ret, .ue_resume_exit)
@@ -869,11 +906,11 @@
 	bz	%xcc, .dis_ue_no_error			! XXX spurious?
 	nop
 	/* save the state of the line */
-	SAVE_L2_LINE_STATE(3, CPU_CE_RPT, %g1, %g2)
-	!! %g1= cpup
+	SAVE_L2_LINE_STATE(3, STRAND_CE_RPT, %g1, %g2)
+	!! %g1= strand
 	!! %g2 = erpt
-	DUMP_L2_SET_TAG_DATA(3, CPU_CE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(3)], %g4	! l2esr
+	DUMP_L2_SET_TAG_DATA(3, STRAND_CE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(3)], %g4	! l2esr
 	CLEAR_L2_ESR(3, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_DIS_UE_IN_L2_ESR(3, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.dis_ue_err_ret, .ue_resume_exit)
@@ -888,9 +925,9 @@
 	! some other thread beat us to it.
 	! no bits in L2, simply return (XXX send a service error report?)
 	! send CE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_CE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	add	%g6, CPU_CE_RPT + CPU_UNSENT_PKT, %g2	! erpt.unsent flag
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	add	%g6, STRAND_CE_RPT + STRAND_UNSENT_PKT, %g2	! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3			! size
 	HVCALL(send_diag_erpt)
 
@@ -918,8 +955,8 @@
 	 * TL overflow causes guest to be reset
 	 */
 	ENTRY_NP(ue_poll_entry)	/* entry point for the error daemon */
-						! %g6->cpu
-	stx	%g7, [%g6 + CPU_ERR_RET]	! save return address
+						! %g6->strand
+	stx	%g7, [%g6 + STRAND_ERR_RET]	! save return address
 
 	ba,a	ue_err_notrap
 	.empty
@@ -940,8 +977,8 @@ ue_err_notrap:
 	bnz,pn	%xcc, .fatal_reset_dbu			!  yes: bail now
 	nop
 
-	/* get cpu, UE buffer in %g6-5, they are safe across calls */
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g6, %g5)	! g6->cpu, g5->cpu.ue_rpt
+	/* get strand, UE buffer in %g6-5, they are safe across calls */
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g6, %g5)	! g6->strand, g5->strand.ue_rpt
 
 	/*
 	 * check to see if UE occurred in hypervisor
@@ -986,9 +1023,10 @@ ue_err_notrap:
 	stxa	%g4, [%g0]ASI_SPARC_ERR_STATUS	! clear everything seen
 
 	! save ue_rpt.sparc_afsr
-	stx	%g4, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR]
+	stx	%g4, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR]
 	! save ue_rpt.sparc_afar
-	stx	%g3, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR]
+	stx	%g3, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR]
+	stx	%g0, [%g5 + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG]
 
 	/*
 	 * Check to see if there is any error to process
@@ -997,7 +1035,6 @@ ue_err_notrap:
 	bz,a	%xcc, .ue_resume_exit	! none: exit
 	  nop
 
-
 	/*
 	 * Generate a basic error report
 	 *
@@ -1005,15 +1042,15 @@ ue_err_notrap:
 	 */
 	LOAD_BASIC_ERPT(%g6, %g5, %g1, %g2)
 
-	mov	%g6, %g1			! cpu
-	mov	%g5, %g2			! cpu.ue_erpt
+	mov	%g6, %g1			! strand
+	mov	%g5, %g2			! strand.ue_erpt
 
 #ifdef DEBUG
 	.pushlocals
 	setx	0xdeadbeefdeadbeef,%g3, %g4
-	set	CPU_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
+	set	STRAND_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_SIZE-8, %g3
 1:	stx	%g4, [%g5 + %g3]
-	cmp	%g3, CPU_VBSC_ERPT + EVBSC_DIAG_BUF
+	cmp	%g3, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF
 	bgu,pt	%xcc, 1b
 	dec	8, %g3
 	.poplocals
@@ -1021,11 +1058,11 @@ ue_err_notrap:
 	! set error descriptor to UE resumable
 	set	EDESC_UE_RESUMABLE, %g3
 	! edesc in guest erpt
-	st	%g3, [%g2 + CPU_SUN4V_ERPT + ESUN4V_EDESC]
+	st	%g3, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_EDESC]
 
 	! check SPARC ESR for thread-specific errors
 	! %g3 = saved sparc_afsr
-	ldx	[%g2 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR], %g3
+	ldx	[%g2 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR], %g3
 	set	SPARC_UE_MEU_BITS, %g4
 	btst	%g4, %g3			! any UE or MEU bit set?
 	bz	%xcc, .ue_dump_l2		! no UEs, check L2
@@ -1110,8 +1147,8 @@ ue_err_notrap:
 	! entity diagnosis report, then call precise_ue_err_ret. In
 	! precise_ue_err_ret, it will queue the error report to guest.
 .ue_fru_err:
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g2, %g2)	! ->cpu.ue_rpt
-	ldx	[%g2 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g2, %g2)	! ->cpu.ue_rpt
+	ldx	[%g2 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
 	!! %g1 = sparc afar
 	HVCALL(clear_fregerr)			! %g1 = input, g2 = output
 	!! %g2 contains a 0 if we got FRU after FRC for a persistent error
@@ -1120,8 +1157,11 @@ ue_err_notrap:
 	! Took an FRU trap from the FRC handler reread. Return to FRC handler
 	PRINT("FRU FROM FRC DIAG\r\n");
 
-	RESTORE_UE_GLOBALS()
+	STRAND_STRUCT(%g6)
+	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 
+	RESTORE_UE_GLOBALS()
+	
 	done					! complete reread of reg
 
 .ue_not_from_frc:
@@ -1140,9 +1180,9 @@ ue_err_notrap:
 	nop
 
 	! FRU is recoverable, send a nonresumable error to the guest
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_FRF,
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_FRF,
 	    EDESC_PRECISE_NONRESUMABLE, %g1, %g2, %g3)
-	CLEAR_SPARC_ESR(CPU_UE_RPT, SPARC_ESR_FRU, %g1, %g2, %g3, %g4)
+	CLEAR_SPARC_ESR(STRAND_UE_RPT, SPARC_ESR_FRU, %g1, %g2, %g3, %g4)
 	PRINT("FRU DIAG\r\n")
 	ba,a	.ue_eer_send_ue_rpt
 
@@ -1151,7 +1191,7 @@ ue_err_notrap:
 	PRINT("CPU in ERROR -FRU\r\n")
 	! Set the CPU_ERROR status flag
 	SET_CPU_IN_ERROR(%g1, %g2)
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_CPU,
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_CPU,
 	    EDESC_UE_RESUMABLE, %g1, %g2, %g3)
 	ba,a	.ue_send_resume_exit
 
@@ -1162,24 +1202,26 @@ ue_err_notrap:
 	 */
 .ue_imdu_err:
 	PRINT("IMDU DIAG\r\n")
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
 	! dump the ITLB entries into cpu.ue_rpt.diag_buf
 	DUMP_ITLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	mov	I_INVALIDATE, %g1
 	stxa	%g0, [%g1] ASI_TLB_INVALIDATE
+#if 0 /* { FIXME: no longer required */
 	mov	MAP_ITLB, %g1
 	HVCALL(remap_perm_addr)
+#endif /* } */
 	! log the TLB entries on the console
 	CONSOLE_PRINT_TLB_DATA("ITLB Tag Data\r\n", %g1, %g2, %g3, %g4,	\
 		%g5, %g6, %g7)
 	! For bringup, dump out the TLB entries after demap page
 #ifdef NIAGARA_BRINGUP
 	PRINT("IMDU demap\r\n")
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
 	add	%g2, 0x400, %g2			! use the second 1KB area
-	! dump the ITLB entries into cpu diag buffer area
+	! dump the ITLB entries into strand diag buffer area
 	DUMP_ITLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	! log the TLB entries on the console for bringup
 	CONSOLE_PRINT_TLB_DATA_2("ITLB Tag Data\r\n", %g1, %g2, %g3,	\
@@ -1217,24 +1259,26 @@ ue_err_notrap:
 	 */
 .ue_dmdu_err:
 	PRINT("DMDU DIAG\r\n")
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
-	! dump the DTLB entries into the cpu diag buffer
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
+	! dump the DTLB entries into the strand diag buffer
 	DUMP_DTLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	! log the TLB data on the console
 	CONSOLE_PRINT_TLB_DATA("DTLB Tag Data\r\n", %g1, %g2, %g3, %g4,	\
 		%g5, %g6, %g7)
 	mov	D_INVALIDATE, %g1
 	stxa	%g0, [%g1] ASI_TLB_INVALIDATE
+#if 0 /* { FIXME: no longer required */
 	mov	MAP_DTLB, %g1
 	HVCALL(remap_perm_addr)
+#endif /* } */
 	! For bringup, dump out the TLB entries after demap page
 #ifdef NIAGARA_BRINGUP
 	PRINT("after demap\r\n")
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
 	add	%g2, 1024, %g2		! use next 1KB area
-	! dump the dtlb entries into the cpu diag buffer
+	! dump the dtlb entries into the strand diag buffer
 	DUMP_DTLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	! log the tlb entries on the console for bringup
 	CONSOLE_PRINT_TLB_DATA_2("DTLB Tag Data\r\n", %g1, %g2, %g3,	\
@@ -1247,8 +1291,8 @@ ue_err_notrap:
 	 * IRU: IRF Uncorrectable ECC Error
 	 */
 .ue_iru_err:
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g2, %g2)
-	ldx	[%g2 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g2, %g2)
+	ldx	[%g2 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1
 	!! %g1 = sparc afar
 	HVCALL(clear_iregerr)			! %g1 = input, %g2 = output
 	!! %g2 = 0 if we got IRU after IRC for a persistent error bit
@@ -1256,6 +1300,9 @@ ue_err_notrap:
 	nop
 	! Took an IRU trap from the IRC handler reread. Return to IRC handler
 	PRINT("IRU FROM IRC DIAG\r\n")
+
+	STRAND_STRUCT(%g6)
+	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 
 	RESTORE_UE_GLOBALS()
 
@@ -1276,15 +1323,15 @@ ue_err_notrap:
 	nop
 
 	! IRU is recoverable, send a nonresumable error to the guest
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_IRF,
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_IRF,
 	    EDESC_PRECISE_NONRESUMABLE, %g1, %g2, %g3)
-	CLEAR_SPARC_ESR(CPU_UE_RPT, SPARC_ESR_IRU, %g1, %g2, %g3, %g4)
+	CLEAR_SPARC_ESR(STRAND_UE_RPT, SPARC_ESR_IRU, %g1, %g2, %g3, %g4)
 	PRINT("IRU DIAG\r\n")
 .ue_eer_send_ue_rpt:
 	! send the sparc_err_ebl reg to the diag eng
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g1, %g2)
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g1, %g2)
 	ldxa	[%g0]ASI_SPARC_ERR_EN, %g3
-	stx	%g3, [%g2 + CPU_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_REG_INFO]
+	stx	%g3, [%g2 + STRAND_VBSC_ERPT + EVBSC_DIAG_BUF + DIAG_BUF_REG_INFO]
 	ba,a	.sendnr_ue_resume_exit
 	/*NOTREACHED*/
 
@@ -1293,7 +1340,7 @@ ue_err_notrap:
 	PRINT("CPU in ERROR - IRU\r\n")
 	! Set the CPU_ERROR status flag
 	SET_CPU_IN_ERROR(%g1, %g2)
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_CPU,
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_CPU,
 	    EDESC_UE_RESUMABLE, %g1, %g2, %g3)
 	ba,a	.ue_resume_exit
 
@@ -1305,20 +1352,22 @@ ue_err_notrap:
 	PRINT("DMSU DIAG\r\n")
 	mov	D_INVALIDATE, %g1
 	stxa	%g0, [%g1] ASI_TLB_INVALIDATE
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
-	! dump the DTLB entries into the cpu diag buffer
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
+	! dump the DTLB entries into the strand diag buffer
 	DUMP_DTLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	! log the TLB data on the console
 	CONSOLE_PRINT_TLB_DATA("DTLB Tag Data\r\n", %g1, %g2, %g3, %g4,	\
 		%g5, %g6, %g7)
+#if 0 /* { FIXME: no longer required */
 	mov	MAP_DTLB, %g1
 	HVCALL(remap_perm_addr)
+#endif /* } */
 	! For bringup we dump the TLB after the demap operation
 #ifdef NIAGARA_BRINGUP
 	PRINT("DMSU demap\r\n")
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
 	add	%g2, 1024, %g2		! use the next 1KB area
 	! dump the dtlb entries
 	DUMP_DTLB(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
@@ -1341,34 +1390,35 @@ ue_err_notrap:
 
 .ue_send_rpt_and_abort:
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
 	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 	! abort HV
 	ba,pt	%xcc, hvabort
-	mov	ABORT_UE_IN_TLB_TAG, %g1
+	rd	%pc, %g1
 	/*NOTREACHED*/
 
 	/*
 	 * NCU: IO Load/Instruction Fetch Error
 	 */
 .ue_ncu_err:
+
 	! check for io_prot
-	CPU_STRUCT(%g1)
-	set	CPU_IO_PROT, %g2
-	ldx	[%g1 + %g2], %g2	! cpu.io_prot
+	STRAND_STRUCT(%g1)
+	set	STRAND_IO_PROT, %g2
+	ldx	[%g1 + %g2], %g2	! strand.io_prot
 	brz	%g2, 1f			! if zero, no error protection
 	nop
 	! under i/o error protection
 	! set the i/o error flag in the cpu structure and complete the
 	! instruction
-	set	CPU_IO_ERROR, %g2
+	set	STRAND_IO_ERROR, %g2
 	mov	1, %g3
-	stx	%g3, [%g1 + %g2]		! cpu.io_error = 1
+	stx	%g3, [%g1 + %g2]		! strand.io_error = 1
 
 	! clear JBI_ERR_LOG, JBI_ERR_OVF
 	setx	JBI_ERR_LOG, %g3, %g4
@@ -1386,9 +1436,15 @@ ue_err_notrap:
 	! process error
 1:
 	PRINT("NCU DIAG\r\n")
+
+	rdhpr	%htstate, %g1
+	btst	HTSTATE_HPRIV, %g1
+	bnz	%xcc, .hpriv_ue
+	nop
+
 	! collect all diagnostic data
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_UE_RPT, %g2		! %g2 = cpu.ue_rpt
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_UE_RPT, %g2		! %g2 = strand.ue_rpt
 	DUMP_JBI_SSI(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
 
 	! clear JBI_ERR_LOG, JBI_ERR_OVF, SSI_LOG
@@ -1416,17 +1472,17 @@ ue_err_notrap:
 	CONSOLE_PRINT_JBI_SSI("JBI SSI Log\r\n", %g1, %g2, %g3, %g4,	\
 		%g5, %g6, %g7)
 	! send UE diag report
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g6, %g1)
-	inc	CPU_VBSC_ERPT, %g1			! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g6, %g1)
+	inc	STRAND_VBSC_ERPT, %g1			! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_PIO,	\
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_PIO,	\
 	   EDESC_PRECISE_NONRESUMABLE, %g4, %g5, %g6)
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g1, %g2)
-	ldx	[%g2 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g3		! VA
-	stx	%g3, [%g2 + CPU_SUN4V_ERPT + ESUN4V_RA]
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g1, %g2)
+	ldx	[%g2 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g3		! VA
+	stx	%g3, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR]
 	ba,a	precise_ue_err_ret		! UE error epilogue
 	/*NOTREACHED*/
 
@@ -1441,16 +1497,16 @@ ue_err_notrap:
 	 */
 .sendnr_ue_resume_exit:				! non-resumable UE epilogue
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)	
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
 	ba,a	precise_ue_err_ret			! UE error epilogue
 
 
-	! %g1 has the cpu pointer, %g2 has the UE error report buffer
+	! %g1 has the strand pointer, %g2 has the UE error report buffer
 .ue_ldau_err:
 .ue_dump_l2:
 	DUMP_L2_DRAM_ERROR_LOGS(%g1, %g2, %g3, %g4, %g5, %g6, %g7)
@@ -1477,11 +1533,11 @@ ue_err_notrap:
 	UE_CHECK_L2_ESR(0, %g1, %g2, %g3, %g4)		! %g1 = L2ESR
 	bz	%xcc, .ue_check_l2_b1			! check next bank
 	nop
-	SAVE_L2_LINE_STATE(0, CPU_UE_RPT, %g1, %g2)
-	DUMP_L2_SET_TAG_DATA(0, CPU_UE_RPT, %g1, %g2, %g1, %g2)
-	!! %g1->cpu
+	SAVE_L2_LINE_STATE(0, STRAND_UE_RPT, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(0, STRAND_UE_RPT, %g1, %g2, %g1, %g2)
+	!! %g1->strand
 	!! %g2->erpt
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(0)], %g4	! l2esr
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(0)], %g4	! l2esr
 	CLEAR_L2_ESR(0, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_UE_IN_L2_ESR(0, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.sendnr_ue_resume_exit, .ue_senddiag_resume_exit,	\
@@ -1491,9 +1547,9 @@ ue_err_notrap:
 	UE_CHECK_L2_ESR(1, %g1, %g2, %g3, %g4)		! %g1 = L2ESR
 	bz	%xcc, .ue_check_l2_b2			! check next bank
 	nop
-	SAVE_L2_LINE_STATE(1, CPU_UE_RPT, %g1, %g2)
-	DUMP_L2_SET_TAG_DATA(1, CPU_UE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(1)], %g4	! l2esr
+	SAVE_L2_LINE_STATE(1, STRAND_UE_RPT, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(1, STRAND_UE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(1)], %g4	! l2esr
 	CLEAR_L2_ESR(1, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_UE_IN_L2_ESR(1, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.sendnr_ue_resume_exit, .ue_senddiag_resume_exit,	\
@@ -1503,9 +1559,9 @@ ue_err_notrap:
 	UE_CHECK_L2_ESR(2, %g1, %g2, %g3, %g4)		! %g1 = L2ESR
 	bz	%xcc, .ue_check_l2_b3			! check next bank
 	nop
-	SAVE_L2_LINE_STATE(2, CPU_UE_RPT, %g1, %g2)
-	DUMP_L2_SET_TAG_DATA(2, CPU_UE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(2)], %g4	! l2esr
+	SAVE_L2_LINE_STATE(2, STRAND_UE_RPT, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(2, STRAND_UE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(2)], %g4	! l2esr
 	CLEAR_L2_ESR(2, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_UE_IN_L2_ESR(2, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.sendnr_ue_resume_exit, .ue_senddiag_resume_exit,	\
@@ -1515,9 +1571,9 @@ ue_err_notrap:
 	UE_CHECK_L2_ESR(3, %g1, %g2, %g3, %g4)		! %g1 = L2ESR
 	bz	%xcc, .ue_no_error			! XXX spurious?
 	nop
-	SAVE_L2_LINE_STATE(3, CPU_UE_RPT, %g1, %g2)
-	DUMP_L2_SET_TAG_DATA(3, CPU_UE_RPT, %g1, %g2, %g1, %g2)
-	ldx	[%g2 + CPU_EVBSC_L2_AFSR(3)], %g4	! l2esr
+	SAVE_L2_LINE_STATE(3, STRAND_UE_RPT, %g1, %g2)
+	DUMP_L2_SET_TAG_DATA(3, STRAND_UE_RPT, %g1, %g2, %g1, %g2)
+	ldx	[%g2 + STRAND_EVBSC_L2_AFSR(3)], %g4	! l2esr
 	CLEAR_L2_ESR(3, %g4, %g5, %g6)			! clear L2 ESR
 	PROCESS_UE_IN_L2_ESR(3, %g1, %g2, %g3, %g4, %g5, %g6, %g7,	\
 		.sendnr_ue_resume_exit, .ue_senddiag_resume_exit,	\
@@ -1540,9 +1596,9 @@ ue_err_notrap:
 	 * the instruction retry.
 	 */
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1 ! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1 ! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2			! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3			! size
 	HVCALL(send_diag_erpt)
@@ -1553,9 +1609,9 @@ ue_err_notrap:
 .tl_overflow:
 	PRINT("TL OVERFLOW\r\n")
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
@@ -1566,50 +1622,72 @@ ue_err_notrap:
 
 .hpriv_ue:
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
+
 	HVCALL(send_diag_erpt)
-#ifdef DEBUG
-	PRINT("UE in hypervisor - reset the system\r\n")
+
+	HV_PRINT_SPINLOCK_ENTER(%g1, %g2, %g3)
+	HV_PRINT_NOTRAP("UE in hypervisor - reset the system\r\n")
 	rdpr	%tl, %g2
-	deccc	%g2
-	bz	%xcc, 1f
-	nop
-	wrpr	%g2, %tl
-	PRINT("TPC \r\n")
+
+	HV_PRINT_NOTRAP("TPC: 0x")
 	rdpr	%tpc, %g1
-	PRINTX(%g1)
-	PRINT("\r\n")
-	PRINT("TT \r\n")
+	HV_PRINTX_NOTRAP(%g1)
+	HV_PRINT_NOTRAP("\r\n")
+
+	HV_PRINT_NOTRAP("TT: 0x")
 	rdpr	%tt, %g1
-	PRINTX(%g1)
-	PRINT("\r\n")
-	PRINT("TSTATE \r\n")
+	HV_PRINTX_NOTRAP(%g1)
+	HV_PRINT_NOTRAP("\r\n")
+
+	HV_PRINT_NOTRAP("TSTATE: 0x")
 	rdpr	%tstate, %g1
-	PRINTX(%g1)
-	PRINT("\r\n")
-1:
-#endif
-	CPU_STRUCT(%g6)
+	HV_PRINTX_NOTRAP(%g1)
+	HV_PRINT_NOTRAP("\r\n")
+
+	HV_PRINT_SPINLOCK_EXIT(%g1)
+
+	STRAND_STRUCT(%g6)
 	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 	LEGION_EXIT(3)
 	! abort HV
 	ba,pt	%xcc, hvabort
-	mov	ABORT_UE_IN_HV, %g1
+	rd	%pc, %g1
 
-.err_resume_abort_bad_guest_err_q:
-	CPU_STRUCT(%g6)
-	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g2, %g4)
-	ba,pt	%xcc, hvabort
-	mov	ABORT_BAD_GUEST_ERR_Q, %g1
-
+.err_resume_bad_guest_err_q:
+	SET_CPU_IN_ERROR(%g1, %g2)
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_CPU,
+	    EDESC_UE_RESUMABLE, %g1, %g2, %g3)
+	ba,a	.ue_send_resume_exit			! resumable UE
 
 .fatal_reset_dbu:		/* this is where we take the system down! */
 	! don't care how we got here, stop everything now
 	PRINT("Reset the System:  sir 0  %o0=1 fatal error\r\n")
+1:
+	PRINT("TT 0x")
+	rdpr	%tt, %g1
+	PRINTX(%g1)
+	PRINT(" TL 0x")
+	rdpr	%tl, %g2
+	PRINTX(%g2)
+	PRINT(" TPC 0x")
+	rdpr	%tpc, %g1
+	PRINTX(%g1)
+	PRINT(" TNPC 0x")
+	rdpr	%tnpc, %g1
+	PRINTX(%g1)
+	PRINT(" TSTATE 0x")
+	rdpr	%tstate, %g1
+	PRINTX(%g1)
+	PRINT("\r\n")
+	sub %g2, 1, %g2
+	brnz	%g2, 1b
+	  wrpr	%g2, %tl
+
 	mov	SIR_TYPE_FATAL_DBU, %o0
 	sir	0
 
@@ -1628,13 +1706,127 @@ ue_err_notrap:
 	PRINT("DIS UE_ERR_RET\r\n")
 
 	/* send diag report to vbsc */
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_CE_RPT + CPU_VBSC_ERPT, %g1
-	add	%g6, CPU_CE_RPT + CPU_UNSENT_PKT, %g2	! erpt.unsent flag
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g1
+	add	%g6, STRAND_CE_RPT + STRAND_UNSENT_PKT, %g2	! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3
 	HVCALL(send_diag_erpt)
 
-	ASMCALL_RQ_ERPT(CPU_CE_RPT, %g1, %g2, %g3, %g4, %g5, %g6, %g7)
+.dis_ue_err_rerouting:
+
+	/*
+	 * Check if this error needs to be re-routed
+	 * Find which L2 ESR is set and check whether the
+	 * error requires re-routing. If the ESR is non-zero
+	 * but not re-routing, continue as normal.
+	 */
+	setx	L2_ESR_REROUTED_BITS, %g5, %g4
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_CE_RPT, %g6
+
+	ldx	[%g6  + STRAND_EVBSC_L2_AFSR(0)], %g5
+	btst	%g5, %g4
+	bnz,pt	%xcc, .dis_ue_err_ret_rerouting
+	mov	0, %g1	! bank number 
+	brnz,pt	%g5, .dis_ue_err_ret_no_rerouting
+	nop
+	ldx	[%g6  + STRAND_EVBSC_L2_AFSR(1)], %g5
+	btst	%g5, %g4
+	bnz,pt	%xcc, .dis_ue_err_ret_rerouting
+	mov	1, %g1	! bank number 
+	brnz,pt	%g5, .dis_ue_err_ret_no_rerouting
+	nop
+	ldx	[%g6  + STRAND_EVBSC_L2_AFSR(2)], %g5
+	btst	%g5, %g4
+	bnz,pt	%xcc, .dis_ue_err_ret_rerouting
+	mov	2, %g1	! bank number 
+	brnz,pt	%g5, .dis_ue_err_ret_no_rerouting
+	nop
+	ldx	[%g6  + STRAND_EVBSC_L2_AFSR(3)], %g5
+	btst	%g5, %g4
+	bnz,pn %xcc, .dis_ue_err_ret_rerouting
+	mov	3, %g1	! bank number 
+	nop
+	ba	.dis_ue_err_ret_no_rerouting
+	nop
+
+	/*
+	 * re-route an error report
+	 * 1. Get the PA of the error from the diag report
+	 * 2. determine whch guest this PA belongs to
+	 */
+.dis_ue_err_ret_rerouting:
+	! %g1	bank number
+	! %g5	L2 ESR
+	! %g6	strand->ce_rprt
+	
+	/*
+	 * Need to get the PA from either the DRAM or L2 EAR
+	 */
+	setx	(L2_ESR_DAU | L2_ESR_DSU), %g3, %g2
+	btst	%g5, %g2
+	be,pt	%xcc, .dis_ue_err_ret_rerouting_l2
+	nop
+
+	! DRAM error
+	! %g1	bank number
+	mulx	%g1, EVBSC_DRAM_AFAR_INCR, %g1
+	add	%g1, EVBSC_DRAM_AFAR, %g1
+	ldx	[%g6 + %g1], %g4		! PA
+	ba	.dis_ue_err_ret_rerouting_find_guest
+	nop
+
+.dis_ue_err_ret_rerouting_l2:
+	! %g1	bank number
+	mulx	%g1, EVBSC_L2_AFAR_INCR, %g1
+	add	%g1, EVBSC_L2_AFAR, %g1
+	ldx	[%g6 + %g1], %g4		! PA
+
+.dis_ue_err_ret_rerouting_find_guest:
+	/*
+	 * Find the guest which owns this PA.
+	 * For each guest loop through the ra2pa_segment array and check the
+	 * PA against the base/limit
+	 * %g4	PA
+	 */
+	ROOT_STRUCT(%g2)
+	ldx     [%g2 + CONFIG_GUESTS], %g2	! &guests[0]
+	set	NGUESTS - 1, %g3		! %g3	guest loop counter
+1:
+	! PA2RA_CONV(guestp, paddr, raddr, scr1, scr2)
+	PA2RA_CONV(%g2, %g4, %g6, %g1, %g5)
+	! we got a valid RA (%g6), so this is the guest for this PA
+	brz,pt	%g5, 4f
+	nop
+2:
+	set	GUEST_SIZE, %g5
+	add	%g2, %g5, %g2			! guest++
+	brnz,pt	%g3, 1b
+	dec	%g3				! nguests--
+
+	! no guest found for this PA
+	ba	.dis_ue_err_ret_no_rerouting
+	nop
+4:
+	! %g2	&guest
+	! %g4	PA	
+
+	! is it for the guest we are running on ?
+	GUEST_STRUCT(%g1)
+	cmp	%g1, %g2	
+	be	.dis_ue_err_ret_no_rerouting
+	nop
+
+	! go and finish re-routing this error
+	ba	cpu_reroute_error
+	nop
+
+	/*
+	 * send resumable error report on this CPU
+	 */
+.dis_ue_err_ret_no_rerouting:
+
+	ASMCALL_RQ_ERPT(STRAND_CE_RPT, %g1, %g2, %g3, %g4, %g5, %g6, %g7)
 
 	ba,a	.dis_ue_resume_exit
 
@@ -1648,15 +1840,15 @@ ue_err_notrap:
 	ENTRY_NP(precise_ue_res_ret)
 	PRINT("RES UE_ERR_RET\r\n")
 	! Call the function to queue the resumable report
-	ASMCALL_RQ_ERPT(CPU_UE_RPT, %g1, %g2, %g3, %g4, %g5, %g6, %g7)
+	ASMCALL_RQ_ERPT(STRAND_UE_RPT, %g1, %g2, %g3, %g4, %g5, %g6, %g7)
 	ba,a	.ue_resume_exit
 #endif
 
 .ue_senddiag_resume_exit:
 	! send UE diag report
-	CPU_STRUCT(%g6)
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	STRAND_STRUCT(%g6)
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
@@ -1664,20 +1856,22 @@ ue_err_notrap:
 .dis_ue_resume_exit:
 .ue_resume_exit:
 	! See if CPU is in ERROR and handle the case
-	CPU_STRUCT(%g1)
+	VCPU_STRUCT(%g1)
 	IS_CPU_IN_ERROR(%g1, %g2)
 	bne	%xcc, .ue_continue
 	nop
-	HVCALL(cpu_in_error)
+
+	! Mark the corresponding strand in error
+	HVCALL(strand_in_error)
 
 .ue_continue:
-	CPU_STRUCT(%g6)					! restore
+	STRAND_STRUCT(%g6)
 
 	/*
 	 * Check whether the UE error handler idled the
 	 * strands
 	 */
-	lduw	[%g6 + CPU_ERR_FLAG], %g2
+	lduw	[%g6 + STRAND_ERR_FLAG], %g2
 	btst	ERR_FLAG_STRANDS_NOT_IDLED, %g2
 	bnz	%xcc, .ue_continue_not_idled	! strands were not idled
 	bclr	ERR_FLAG_STRANDS_NOT_IDLED, %g2	! reset STRANDS_IDLED
@@ -1688,13 +1882,13 @@ ue_err_notrap:
 
 .ue_continue_not_idled:
 
-	stw	%g2, [%g6 + CPU_ERR_FLAG]	!	..
+	stw	%g2, [%g6 + STRAND_ERR_FLAG]	!	..
 
 .ue_continue_idled:
 
-	ldx	[%g6 + CPU_ERR_RET], %g7	! get return address
+	ldx	[%g6 + STRAND_ERR_RET], %g7	! get return address
 	brnz,a	%g7, .ue_return			!   valid: clear it & return
-	  stx	%g0, [%g6+ CPU_ERR_RET]		!           ..
+	  stx	%g0, [%g6+ STRAND_ERR_RET]		!           ..
 						! NULL: return from interrupt
 	RESTORE_UE_GLOBALS()
 	retry					! return from UE interrupt
@@ -1714,7 +1908,7 @@ ue_err_notrap:
 	PRINT("precise_ue_err_ret\r\n")
 
 	! queue nonresumable error report
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g1, %g2)
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g1, %g2)
 
 	/*
 	 * Translate error address
@@ -1723,105 +1917,73 @@ ue_err_notrap:
 	 * For others, check the four L2 AFARs to find a non-zero
 	 * address.
 	 */
-	lduw	[%g2 + CPU_SUN4V_ERPT + ESUN4V_ATTR], %g4
+	lduw	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4
 	btst	EATTR_PIO, %g4
 	bz,pt	%xcc, .precise_ue_err_ret_mem
 	nop
 
 .precise_ue_err_ret_io:
 	/* No affected memory region */
-	stw	%g0, [%g2 + CPU_SUN4V_ERPT + ESUN4V_SZ]
+	stw	%g0, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
 
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_RA], %g4
-	CPU_ERR_IO_PA_TO_RA(%g1, %g4, %g4, %g3, %g5, %g6, .prec_ue_err_ret_io)
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4
+	VCPU_STRUCT(%g1)
+	CPU_ERR_IO_PA_TO_RA(%g1, %g4, %g4, %g3, %g5, %g6, .precise_ue_err_ret_io)
 	ba,pt	%xcc, 2f
 	nop
 
 .precise_ue_err_ret_mem:
 	mov	ERPT_MEM_SIZE, %g4
-	stw	%g4, [%g2 + CPU_SUN4V_ERPT + ESUN4V_SZ]
-	ldx	[%g2 + CPU_EVBSC_L2_AFAR(0)], %g4
+	stw	%g4, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(0)], %g4
 	brnz	%g4, 1f
 	nop
-	ldx	[%g2 + CPU_EVBSC_L2_AFAR(1)], %g4
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(1)], %g4
 	brnz	%g4, 1f
 	nop
-	ldx	[%g2 + CPU_EVBSC_L2_AFAR(2)], %g4
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(2)], %g4
 	brnz	%g4, 1f
 	nop
-	ldx	[%g2 + CPU_EVBSC_L2_AFAR(3)], %g4
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(3)], %g4
 	brnz	%g4, 1f
 	nop
 	ba,pt	%xcc, 2f
 	mov	CPU_ERR_INVALID_RA, %g4
 
 1:
-	CPU_STRUCT(%g1)
+	VCPU_STRUCT(%g1)	/* FIXME: or strand? */
 	CPU_ERR_PA_TO_RA(%g1, %g4, %g4, %g5, %g6)
 
 2:
-	stx	%g4, [%g2 + CPU_SUN4V_ERPT + ESUN4V_RA]
+	stx	%g4, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR]
 
 	!! %g1 = cpup
 	!! %g2 = erpt
 	HVCALL(queue_nonresumable_erpt)
 
+	STRAND_STRUCT(%g1)
 	SPINLOCK_RESUME_ALL_STRAND(%g1, %g3, %g4, %g5, %g6)
 
-	/*
-	 * Jump to the nonresumable_error trap of the privileged code.
-	 * Select trap table entry based on TL.
-	 */
-	wrpr	%g0, NON_RESUMABLE_TT, %tt
-
-	/*
-	 * ensure that the guest is not entered in an illegal state
-	 */
-	rdpr	%gl, %g1
-	cmp	%g1, MAXPGL
-	bgu,pn	%xcc, watchdog_guest
-	rdpr	%tl, %g1
-	cmp	%g1, MAXPTL
-	bgu,pn	%xcc, watchdog_guest
-	nop 
-
-	/*
-	 * Note that it is not possible to reach this point
-	 * with GL saturated, so we do not need to use
-	 * RESTORE_UE_GLOBALS() here
-	 */
-
-	rdpr	%pstate, %g1
-	or	%g1, PSTATE_PRIV, %g1	! in case we were in user
-	wrpr	%g1, %pstate
-	rdpr	%tba, %g1
-	add	%g1, (NON_RESUMABLE_TT << TT_OFFSET_SHIFT), %g1
-	rdpr	%tl, %g2
-	cmp	%g2, 1
-	be,pt	%xcc, 2f		! if TL - 1 == 0, go to 2
-	set	TRAPTABLE_SIZE, %g5	! set TL bit in trap address
-	add	%g5, %g1, %g1		! add TL for TL > 1
-2:
-	mov	HPSTATE_GUEST, %g5
-	jmp	%g1			! jump to priv nonresumable_error
-	wrhpr	%g5, %hpstate
+	ba,pt	%xcc, nonresumable_error_trap
+	nop
 	/*NOTREACHED*/
 	SET_SIZE(precise_ue_err_ret)
 
-#if CPU_SUN4V_ERPT != 0
-#error "CPU_SUN4V_ERPT must be 0"
+#if STRAND_SUN4V_ERPT != 0
+#error "STRAND_SUN4V_ERPT must be 0"
 #endif
 
 /*
  * Queue a resumable error report on this CPU
- * %g1 contains pointer to the CPU structure
+ * %g1 contains pointer to the STRAND structure
  * %g2 contains pointer to the error report
- * (CPU_SUN4V_ERPT *must* be 0x0 for this to be called generically)
+ * (STRAND_SUN4V_ERPT *must* be 0x0 for this to be called generically)
  *
  * XXX If there is no free entry in the resumable error queue
  * print a message and return. XXX
  */
 	ENTRY_NP(queue_resumable_erpt)
+	VCPU_STRUCT(%g1)
 	ldx	[%g1 + CPU_ERRQR_BASE_RA], %g3		! get q base RA
 	brnz	%g3, 1f			! if base RA is zero, skip
 	nop
@@ -1832,16 +1994,61 @@ ue_err_notrap:
 	! simply return. No guest is there to receive it.
 	jmp	%g7 + 4
 	nop
+1:
+	/*
+	 * Translate error address
+	 *
+	 * When EATTR_PIO, the error PA is in the RA field of the erpt.
+	 * For others, check the four L2 AFARs to find a non-zero
+	 * address.
+	 */
+	lduw	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4
+	btst	EATTR_PIO, %g4
+	bz,pt	%xcc, .dis_ue_err_ret_mem
+	nop
 
+.dis_ue_err_ret_io:
+	/* No affected memory region */
+	stw	%g0, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
+
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4
+	CPU_ERR_IO_PA_TO_RA(%g1, %g4, %g4, %g3, %g5, %g6, .dis_ue_err_ret_io)
+	ba,pt	%xcc, 2f
+	nop
+
+.dis_ue_err_ret_mem:
+	mov	ERPT_MEM_SIZE, %g4
+	stw	%g4, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(0)], %g4
+	brnz	%g4, 1f
+	nop
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(1)], %g4
+	brnz	%g4, 1f
+	nop
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(2)], %g4
+	brnz	%g4, 1f
+	nop
+	ldx	[%g2 + STRAND_EVBSC_L2_AFAR(3)], %g4
+	brnz	%g4, 1f
+	nop
+	ba,pt	%xcc, 2f
+	mov	CPU_ERR_INVALID_RA, %g4
+
+1:
+	VCPU_STRUCT(%g1)	/* FIXME: or strand? */
+	CPU_ERR_PA_TO_RA(%g1, %g4, %g4, %g5, %g6)
+
+2:
+	stx	%g4, [%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR]
 	/*
 	 * If this is a MEM error report, ensure that it has a valid
 	 * RA for this guest
 	 */
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
 	btst	EATTR_MEM, %g4
 	bz,pt	%xcc, 1f
 	nop
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_RA], %g4	! ra
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4	! ra
 	cmp	%g4, CPU_ERR_INVALID_RA
 	bne,pt %xcc, 1f
 	nop
@@ -1865,21 +2072,21 @@ ue_err_notrap:
 	! write up the queue record
 	ldx	[%g1 + CPU_ERRQR_BASE], %g4
 	add	%g5, %g4, %g3			! %g3 = base + tail
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
 	stx	%g4, [%g3 + 0x0]
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
 	stx	%g4, [%g3 + 0x8]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
 	st	%g4, [%g3 + 0x10]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
 	st	%g4, [%g3 + 0x14]
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_RA], %g4	! ra
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4	! ra
 	stx	%g4, [%g3 + 0x18]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_SZ], %g4	! sz
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ], %g4	! sz
 	st	%g4, [%g3 + 0x20]
-	lduh	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
+	lduh	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
 	stuh	%g4, [%g3 + 0x24]
-	lduh	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_SECS], %g4
+	lduh	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_SECS], %g4
 	stuh	%g4, [%g3 + 0x26]		! pad/secs
 	stx	%g0, [%g3 + 0x28]		! word5
 	stx	%g0, [%g3 + 0x30]		! word6
@@ -1901,16 +2108,63 @@ ue_err_notrap:
 
 /*
  * Queue a nonresumable error report on this CPU
- * %g1 contains pointer to the CPU structure
  * %g2 contains pointer to the error report
+ * %g1, %g3 - %g6       clobbered
+ * %g7  return address
  *
- * If there is no free entry in the nonresumable error queue
- * print a message and abort the guest.
+ * Check to see what is the guest state:
+ *	switch(guestp->state) {
+ *	case GUEST_STATE_SUSPENDED:
+ *	case GUEST_STATE_NORMAL:
+ *		! calculate new head
+ *		oldtail = [ERROR_NONRESUMABLE_QUEUE_TAIL]ASI_QUEUE
+ *		qnr_mask =vpup->errqnr_mask;
+ *		newtail = (oldtail + qsize) & mask;
+ *		head = [ERROR_NONRESUMABLE_QUEUE_HEAD]ASI_QUEUE
+ *		if (vcpup->cpu_errqnr_base_ra == 0 || (head == newhead)) {
+ *			sir_guest()
+ *		} else {
+ *			deliver_pkt(pkt);
+ *		}
+ *		break;
+ *	case GUEST_STATE_EXITING:
+ *	case GUEST_STATE_STOPPED:
+ *	case GUEST_STATE_UNCONFIGURED:
+ *		drop_pkt();
+ *
+ *		break;
+ *	}
  *
  * This routine just moves the erpt to the queue, it does not
  * modify the data.
  */
 	ENTRY_NP(queue_nonresumable_erpt)
+
+	VCPU_STRUCT(%g1)
+	! Get the guest structure this vcpu belongs
+	VCPU2GUEST_STRUCT(%g1, %g5)
+
+	! Determine the guest state
+	lduw	[%g5 + GUEST_STATE], %g4
+	set	GUEST_STATE_SUSPENDED, %g3
+	cmp	%g4, %g3
+	be,pn	%xcc, .check_vcpu_queues
+	set	GUEST_STATE_NORMAL, %g3
+	cmp	%g4, %g3
+	be,pn	%xcc, .check_vcpu_queues
+	set	GUEST_STATE_EXITING, %g3
+	cmp	%g4, %g3
+	be,pn	%xcc, .drop_nrq_pkt
+	set	GUEST_STATE_STOPPED, %g3
+	cmp	%g4, %g3
+	be,pn	%xcc, .drop_nrq_pkt
+	set	GUEST_STATE_UNCONFIGURED, %g3
+	cmp	%g4, %g3
+	be,pn	%xcc, .drop_nrq_pkt
+	nop
+
+.check_vcpu_queues:
+	! %g1 vcpup
 	ldx	[%g1 + CPU_ERRQNR_BASE_RA], %g3		! get q base RA
 	brz,pn	%g3, .queue_nonresumable_bad_queue
 	nop
@@ -1924,23 +2178,27 @@ ue_err_notrap:
 	cmp	%g6, %g4			! head = ++tail?
 	be,pn	%xcc, .queue_nonresumable_full_queue
 	mov	ERROR_NONRESUMABLE_QUEUE_TAIL, %g3
+
+	/*
+	 * Deliver NR error pkt to guest
+	 */
 	stxa	%g6, [%g3]ASI_QUEUE		! new tail = rq_next
 	! write the queue record
 	ldx	[%g1 + CPU_ERRQNR_BASE], %g4
 	add	%g5, %g4, %g3			! %g3 = base + tail
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
 	stx	%g4, [%g3 + 0x0]
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
 	stx	%g4, [%g3 + 0x8]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
 	st	%g4, [%g3 + 0x10]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
 	st	%g4, [%g3 + 0x14]
-	ldx	[%g2 + CPU_SUN4V_ERPT + ESUN4V_RA], %g4	! ra
+	ldx	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4	! ra
 	stx	%g4, [%g3 + 0x18]
-	ld	[%g2 + CPU_SUN4V_ERPT + ESUN4V_SZ], %g4	! sz
+	ld	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_SZ], %g4	! sz
 	st	%g4, [%g3 + 0x20]
-	lduh	[%g2 + CPU_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
+	lduh	[%g2 + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
 	stuh	%g4, [%g3 + 0x24]
 	stuh	%g0, [%g3 + 0x26]		! pad
 	stx	%g0, [%g3 + 0x28]		! word5
@@ -1953,6 +2211,18 @@ ue_err_notrap:
 
 	HVRET
 
+.drop_nrq_pkt:
+	/*
+	 * The guest is not in the proper state to receive pkts
+	 * Drop packet by just returning
+	 */
+#ifdef DEBUG
+	mov	%g7, %g6
+	PRINT("no guest to deliver NR error pkt. Dropping it\r\n")
+	mov	%g6, %g7
+#endif
+	HVRET
+
 .queue_nonresumable_full_queue:
 	/*
 	 * The nonresumable error queue is full.
@@ -1963,7 +2233,7 @@ ue_err_notrap:
 	PRINT("queue_nonresumable_erpt: nrq full - exiting guest\r\n")
 	mov	%g6, %g7
 #endif
-	ba,a	.queue_nonresumable_abort
+	ba,a	.queue_nonresumable_reset
 
 .queue_nonresumable_bad_queue:
 	/*
@@ -1977,7 +2247,7 @@ ue_err_notrap:
 #endif
 	/* fall through */
 
-.queue_nonresumable_abort:
+.queue_nonresumable_reset:
 #ifdef NIAGARA_BRINGUP
 	rdpr	%tl, %g2
 	deccc	%g2
@@ -1998,15 +2268,16 @@ ue_err_notrap:
 	PRINT("\r\n")
 1:
 #endif
-	ba,a	.err_resume_abort_bad_guest_err_q
+	ba,a	.err_resume_bad_guest_err_q
 	SET_SIZE(queue_nonresumable_erpt)
+
 
 /*
  * JBUS error
  */
 	ENTRY(ue_jbus_err)
 
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g6, %g5)	! g6->cpu, g5->cpu.ue_rpt
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g6, %g5)	! g6->strand, g5->strand.ue_rpt
 
 	SPINLOCK_IDLE_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 	! At this point, this is the only strand executing
@@ -2019,36 +2290,71 @@ ue_err_notrap:
 	/*
 	 * Clear unused diag buf fields
 	 */
-	stx	%g0, [%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFSR]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_L2_AFSR(0)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_L2_AFSR(1)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_L2_AFSR(2)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_L2_AFSR(3)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_DRAM_AFSR(0)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_DRAM_AFSR(1)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_DRAM_AFSR(2)]
-	stx     %g0, [%g5 + CPU_VBSC_ERPT + CPU_EVBSC_DRAM_AFSR(3)]
+	stx	%g0, [%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFSR]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_L2_AFSR(0)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_L2_AFSR(1)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_L2_AFSR(2)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_L2_AFSR(3)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_DRAM_AFSR(0)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_DRAM_AFSR(1)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_DRAM_AFSR(2)]
+	stx     %g0, [%g5 + STRAND_VBSC_ERPT + STRAND_EVBSC_DRAM_AFSR(3)]
 
-	 ! Store JBUS error data in error report
-
+	/*
+	 * Store JBUS error data in error report
+	 */
 	DUMP_JBI_SSI(%g6, %g5, %g3, %g4, %g1, %g2, %g7)
 
-	! send UE diag report
+	/*
+	 * Clear the JBI errors logged in the erpt
+	 */
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT, %g6, %g5)	! g6->strand, g5->strand.ue_rpt
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG], %g1
+	setx	JBI_ERR_LOG, %g3, %g2
+	stx	%g1, [%g2]
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_DIAG_BUF + JS_JBI_ERR_OVF], %g4
+	setx	JBI_ERR_OVF, %g3, %g2
+	stx	%g4, [%g2]
+	or	%g1, %g4, %g1	! combine primary and overflow for fatal check
+	CPU_PUSH(%g1, %g2, %g3, %g4) /* save JBI_ERR_LOG|JVI_ERR_OVF */
 
-	add	%g6, CPU_UE_RPT + CPU_VBSC_ERPT, %g1	! erpt.vbsc
-	set	CPU_UE_RPT + CPU_UNSENT_PKT, %g2
+	/*
+	 * send UE diag report
+	 */
+	add	%g6, STRAND_UE_RPT + STRAND_VBSC_ERPT, %g1	! erpt.vbsc
+	set	STRAND_UE_RPT + STRAND_UNSENT_PKT, %g2
 	add	%g6, %g2, %g2				! erpt.unsent flag
 	mov	EVBSC_SIZE, %g3				! size
 	HVCALL(send_diag_erpt)
 
-	! abort the hypervisor now
-
-	CPU_STRUCT(%g6)
+	STRAND_STRUCT(%g6)
 	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
+	
+	/*
+	 * Clear interrupt
+	 */
+	setx	IOBBASE, %g3, %g2
+	stx	%g0, [%g2 + INT_CTL + INT_CTL_DEV_OFF(IOBDEV_SSIERR)]
+
+	/*
+	 * Get saved JBI error log register and check for fatal errors
+	 */
+	CPU_POP(%g1, %g2, %g3, %g4)
+	btst	JBI_ABORT_ERRS, %g1
+	bnz,pn	%xcc, .ue_jbus_err_fatal
+	nop
+
+	/*
+	 * Not a fatal JBI error, we sent the info to vbsc so just
+	 * return to whatever this strand was doing.
+	 */
+	retry
+
+.ue_jbus_err_fatal:
 	LEGION_EXIT(3)
 	! abort HV
 	ba,pt	%xcc, hvabort
-	mov	ABORT_JBI_ERR, %g1
+	rd	%pc, %g1
 	SET_SIZE(ue_jbus_err)
 
 
@@ -2080,29 +2386,29 @@ ue_err_notrap:
 	 *	%g3 - scratch
 	 *	%g4 - scratch
 	 *	%g5 - erpt
-	 *	%g6 - cpup
+	 *	%g6 - strand
 	 *	%g7 - return address
 	 */
 	ENTRY_NP(irc_check)
 
-	! init CPU.irc_ear
-	stx	%g1, [%g6 + CPU_REGERR] ! CPU.irc_ear = sparc EAR (!=0)
+	! init STRAND.irc_ear
+	stx	%g1, [%g6 + STRAND_REGERR] ! CPU.irc_ear = sparc EAR (!=0)
 
 	! reread register
 	mov	%g7, %g6		! save return address
 	HVCALL(irf_reread)		! %g1 has SPARC EAR
 	mov	%g6, %g7		! restore return address
 
-	CPU_STRUCT(%g6)			! restore g6->cpu
+	STRAND_STRUCT(%g6)		! restore g6->strand
 
-	! check CPU.irc_ear
-	ldx	[%g6 + CPU_REGERR], %g2 ! read CPU.irc_ear
+	! check STRAND.irc_ear
+	ldx	[%g6 + STRAND_REGERR], %g2 ! read STRAND.irc_ear
 	brz	%g2, .irc_ret		! persistent error
 	mov	RF_PERSISTENT, %g2
 
 	! transient error. H/W has fixed it now after the reread
 	! get back to interrupted program
-	stx	%g0, [%g6 + CPU_REGERR]		! clear irc_ear
+	stx	%g0, [%g6 + STRAND_REGERR]		! clear irc_ear
 	mov	RF_TRANSIENT, %g2		! return transient
 .irc_ret:
 	HVRET
@@ -2131,7 +2437,7 @@ ue_err_notrap:
 	 *	%g3 - scratch
 	 *	%g4 - scratch
 	 *	%g5 - erpt pointer
-	 *	%g6 - cpu pointer
+	 *	%g6 - strand pointer
 	 */
 	ENTRY_NP(iru_check)
 	mov	%g7, %g6			! save return address
@@ -2142,7 +2448,7 @@ ue_err_notrap:
 	HVCALL(irf_reread)			! %g1 has SPARC EAR
 
 	mov	%g6, %g7			! restore return address
-	CPU_STRUCT(%g6)				! restore cpup
+	STRAND_STRUCT(%g6)			! restore strand
 
 	! check SPARC ESR for IRU error
 	ldxa	[%g0]ASI_SPARC_ERR_STATUS, %g4	! get SPARC ESR
@@ -2154,7 +2460,7 @@ ue_err_notrap:
 	! persistent IRU error?
 	! check EAR for match
 	ldxa	[%g0]ASI_SPARC_ERR_ADDR, %g2	! get SPARC EAR
-	ldx	[%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! saved EAR
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! saved EAR
 	xor	%g2, %g1, %g2			! Are they the same?
 	andcc	%g2, SPARC_EAR_IREG_MASK, %g2	! (ignore non-register bits)
 	bnz	%xcc, .iru_ret			!   no:
@@ -2321,11 +2627,11 @@ ue_err_notrap:
 	 *	%g2 - output - 0 if CPU.iregerr matches, 1 if no match
 	 *	%g3, %g4 - scratch
 	 *	%g5 - erpt pointer
-	 *	%g6 - cpu pointer
+	 *	%g6 - strand pointer
 	 *	%g7 - return address
 	 */
 	ENTRY_NP(clear_iregerr)
-	ldx	[%g6 + CPU_REGERR], %g3		! %g3 = CPU.iregerr
+	ldx	[%g6 + STRAND_REGERR], %g3		! %g3 = STRAND.iregerr
 
 	! compare the register number from EAR
 	xor	%g3, %g1, %g3			! Are they the same?
@@ -2338,7 +2644,7 @@ ue_err_notrap:
 	! %g4 has CPU.iregerr address
 	! IRU was taken from IRC trap handler reread attempt
 .ireg_match:
-	stx	%g0, [%g6 + CPU_REGERR]		! clear CPU.iregerr
+	stx	%g0, [%g6 + STRAND_REGERR]		! clear STRAND.iregerr
 	mov	%g0, %g2			! return 0 for ireg match
 	HVRET
 	SET_SIZE(clear_iregerr)
@@ -2501,21 +2807,22 @@ ue_err_notrap:
 	 *	%g3 - scratch
 	 *	%g4 - scratch
 	 *	%g5 - erpt pointer
-	 *	%g6 - cpu pointer
+	 *	%g6 - strand pointer
 	 */
 	ENTRY_NP(frc_check)
 
-	! init cpu.frc_ear
-	stx	%g1, [%g6 + CPU_REGERR]		! cpu.frc_ear = sparc EAR (!=0)
+	! init strand.frc_ear
+	stx	%g1, [%g6 + STRAND_REGERR]		! strand.frc_ear = sparc EAR (!=0)
 
 	/*
-	 * It is possible that FPRS.FEF was disabled when we took the disrupting trap
-	 * caused by the FP CE.  We must ensure that FPRS.FEF is enabled before
-	 * calling frf_reread().
+	 * It is possible that FPRS.FEF was disabled when we took the
+	 * disrupting trap caused by the FP CE.  We must ensure that FPRS.FEF
+	 * is enabled before calling frf_reread().
 	 *
-	 * Note that the Sparc V9 spec mandates that PSTATE.PEF be enabled when we
-	 * take a trap if there is an FPU present. As this error condition can only
-	 * occur with an FPU we do not need to verify PSTATE.PEF here.
+	 * Note that the Sparc V9 spec mandates that PSTATE.PEF be enabled
+	 * when we take a trap if there is an FPU present. As this error
+	 * condition can only occur with an FPU we do not need to verify
+	 * PSTATE.PEF here.
 	 */
 	rd	%fprs, %g5
 	btst	FPRS_FEF, %g5			! FPRS.FEF set ?
@@ -2524,22 +2831,21 @@ ue_err_notrap:
 1:
 	! reread register
 	mov	%g7, %g6			! save return address
-	HVCALL(frf_reread)			! %g1 has SPARC EAR, %g5/%g6 preserved
+	HVCALL(frf_reread)			! %g1 has SPARC EAR, 
+						!     %g5/%g6 preserved
 	wr	%g5, %g0, %fprs			! restore FPRS
 	mov	%g6, %g7			! restore return address
 
-	CPU_STRUCT(%g6)				! restore g6->cpu
-	! restore %g5
-	CPU_ERPT_STRUCT(CPU_CE_RPT, %g6, %g5)	! g6->cpu, g5->cpu.ce_rpt
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, %g6, %g5)	! g6->strand, g5->strand.ce_rpt
 
-	! check cpu.frc_ear
-	ldx	[%g6 + CPU_REGERR], %g2		! read cpu.frc_ear
+	! check strand.frc_ear
+	ldx	[%g6 + STRAND_REGERR], %g2		! read strand.frc_ear
 	brz	%g2, .frc_ret			! persistent error
 	mov	RF_PERSISTENT, %g2
 
 	! transient error. H/W has fixed it now after the reread
 	! get back to interrupted program
-	stx	%g0, [%g6 + CPU_REGERR]		! clear frc_ear
+	stx	%g0, [%g6 + STRAND_REGERR]		! clear frc_ear
 	mov	RF_TRANSIENT, %g2		! return transient
 .frc_ret:
 	HVRET
@@ -2567,7 +2873,7 @@ ue_err_notrap:
 	 *	%g3 - scratch
 	 *	%g4 - scratch
 	 *	%g5 - erpt pointer
-	 *	%g6 - cpu pointer
+	 *	%g6 - strand pointer
 	 */
 	ENTRY_NP(fru_check)
 	mov	%g7, %g6			! save return address
@@ -2578,7 +2884,7 @@ ue_err_notrap:
 	HVCALL(frf_reread)			! %g1 has SPARC EAR
 
 	mov	%g6, %g7			! restore return address
-	CPU_STRUCT(%g6)				! restore cpup
+	STRAND_STRUCT(%g6)			! restore strand
 
 	! check SPARC ESR for FRU error
 	ldxa	[%g0]ASI_SPARC_ERR_STATUS, %g4	! get SPARC ESR
@@ -2590,7 +2896,7 @@ ue_err_notrap:
 	! persistent FRU error?
 	! check EAR for match
 	ldxa	[%g0]ASI_SPARC_ERR_ADDR, %g2	! get SPARC EAR
-	ldx	[%g5 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! saved EAR
+	ldx	[%g5 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], %g1	! saved EAR
 	xor	%g2, %g1, %g2			! Are they the same?
 	andcc	%g2, SPARC_EAR_FPREG_MASK, %g2	! (ignore non-register bits)
 	bnz	%xcc, .fru_ret			!   no:
@@ -2805,11 +3111,11 @@ ue_err_notrap:
 	 *	%g2 - output - 0 if cpu.fregerr matches, 1 if no match
 	 *	%g3, %g4 - scratch
 	 *	%g5 - erpt pointer
-	 *	%g6 - cpu pointer
+	 *	%g6 - strand pointer
 	 *	%g7 - return address
 	 */
 	ENTRY_NP(clear_fregerr)
-	ldx	[%g6 + CPU_REGERR], %g3		! %g3 = cpu.fregerr
+	ldx	[%g6 + STRAND_REGERR], %g3		! %g3 = strand.fregerr
 
 	! get register number from EAR
 	xor	%g3, %g1, %g3			! Are they the same?
@@ -2822,7 +3128,7 @@ ue_err_notrap:
 	! %g4 has cpu.fregerr address
 	! FRU was taken from FRC trap handler reread attempt
 .freg_match:
-	stx	%g0, [%g6 + CPU_REGERR]		! clear cpu.fregerr
+	stx	%g0, [%g6 + STRAND_REGERR]	! clear strand.fregerr
 	mov	%g0, %g2			! return 0 for freg match
 	HVRET
 	SET_SIZE(clear_fregerr)
@@ -3061,10 +3367,10 @@ ue_err_notrap:
 	and	%g3, %g1, %g3			! just the CE bits
 	stxa	%g3, [%g0]ASI_SPARC_ERR_STATUS	! clear SPARC CE afsr bits
 .err_set_sparc_1:
-	CPU_STRUCT(%g3)
-	lduw	[%g3 + CPU_ERR_FLAG], %g1	! installed flags
+	STRAND_STRUCT(%g3)
+	lduw	[%g3 + STRAND_ERR_FLAG], %g1	! installed flags
 	bclr	ERR_FLAG_SPARC, %g1		! reset SPARC ESR
-	stw	%g1, [%g3 + CPU_ERR_FLAG]	!	..
+	stw	%g1, [%g3 + STRAND_ERR_FLAG]	!	..
 
 	ldxa	[%g0]ASI_SPARC_ERR_EN, %g3	! get current
 	or	%g3, %g5, %g3			! set bit(s)
@@ -3131,12 +3437,12 @@ ue_err_notrap:
 	and	%g1, %g2, %g1			! reset CE bits only
 	stx	%g1, [%g3 + %g4]
 
-	CPU_STRUCT(%g3)				! %g3->cpu
+	STRAND_STRUCT(%g3)
 	mov	ERR_FLAG_L2DRAM, %g1		! L2DRAM flag
 	sll	%g1, %g6, %g1			! << bank#
-	lduw	[%g3 + CPU_ERR_FLAG], %g2	! installed flags
+	lduw	[%g3 + STRAND_ERR_FLAG], %g2	! installed flags
 	bclr	%g1, %g2			! reset L2DRAM[bank]
-	stw	%g2, [%g3 + CPU_ERR_FLAG]	!	..
+	stw	%g2, [%g3 + STRAND_ERR_FLAG]	!	..
 	!! %g1 = bits
 	!! %g6 = bank#
 	BSET_L2_BANK_EEN(%g6, %g5, %g2, %g3)	! L2 Bank EEN[%g6] |= %g5
@@ -3180,13 +3486,13 @@ ue_err_notrap:
 	 */
 .err_poll_daemon:
 	/*
-	 * Get cpu, CE buffer in %g6-5, they are safe across calls
+	 * Get strand, CE buffer in %g6-5, they are safe across calls
 	 */
 
-	CPU_STRUCT(%g6)				/* ->cpu */
+	STRAND_STRUCT(%g6)
 
-	stx	%g3, [%g6 + CPU_ERR_POLL_ITT]	! save interrupt tick time
-	stx	%g7, [%g6 + CPU_ERR_POLL_RET]	! save return address
+	stx	%g3, [%g6 + STRAND_ERR_POLL_ITT]	! save interrupt tick time
+	stx	%g7, [%g6 + STRAND_ERR_POLL_RET]	! save return address
 
 	/*
 	 * Look for Sparc errors: test only,
@@ -3219,11 +3525,11 @@ ue_err_notrap:
 	/*
 	 * reinstall poll handler
 	 */
-	ldx	[%g6 + CPU_ROOT], %g1		! ->config
+	STRAND2CONFIG_STRUCT(%g6, %g1)		! ->config
 	ldx	[%g1 + CONFIG_CE_POLL_TIME], %g1 ! g1 = time interval
 	brz	%g1, 9f				! disabled: branch
 	nop
-	ldx	[%g6 + CPU_ERR_POLL_ITT], %g2	! this interrupt tick time
+	ldx	[%g6 + STRAND_ERR_POLL_ITT], %g2 ! this interrupt tick time
 	add	%g1, %g2, %g1			! abs time for next poll
 
 	HVCALL(err_poll_daemon)			! g2 = handler address
@@ -3232,7 +3538,8 @@ ue_err_notrap:
 	HVCALL(cyclic_add_abs)	/* ( abs_tick, address, arg0, arg1 ) */
 9:
 
-	ldx	[%g6 + CPU_ERR_POLL_RET], %g7	! restore return address
+	STRAND_STRUCT(%g6)
+	ldx	[%g6 + STRAND_ERR_POLL_RET], %g7	! restore return address
 	HVRET
 	SET_SIZE(err_poll_daemon)
 
@@ -3252,28 +3559,29 @@ ue_err_notrap:
 	 *   %g1-6
 	 */
 	ENTRY_NP(err_poll_daemon_start)
-	CPU_STRUCT(%g6)				! ->cpu
+	STRAND_STRUCT(%g6)
 
-	stx	%g7, [%g6 + CPU_ERR_POLL_RET]	! save return address
+	stx	%g7, [%g6 + STRAND_ERR_POLL_RET]	! save return address
 
-	lduw	[%g6 + CPU_ERR_FLAG], %g2
+	lduw	[%g6 + STRAND_ERR_FLAG], %g2
 	btst	ERR_FLAG_POLLD, %g2		! handler flags
 	bnz,a	%xcc, 9f			! poll deamon installed?
 	  mov	1, %g1				!   yes: return "running"
 	bset	ERR_FLAG_POLLD, %g2		! set it
-	stw	%g2, [%g6 + CPU_ERR_FLAG]	! store
+	stw	%g2, [%g6 + STRAND_ERR_FLAG]	! store
 
 	/*
 	 * Install the callback handler: just start at now + ce_poll_time
 	 */
-	ldx	[%g6 + CPU_ROOT], %g1		! ->config
+	STRAND2CONFIG_STRUCT(%g6, %g1)		! ->config
 	ldx	[%g1 + CONFIG_CE_POLL_TIME], %g1 ! g1 = cycle time in ticks
 	HVCALL(err_poll_daemon)			! g2 = handler address
 	clr	%g3				! g3 = arg 0 : error bits
 	clr	%g4				! g3 = arg 1 :
 	HVCALL(cyclic_add_rel)	/* ( del_tick, address, arg0, arg1 ) */
 
-	ldx	[%g6 + CPU_ERR_POLL_RET], %g7	! restore return address
+	STRAND_STRUCT(%g6)
+	ldx	[%g6 + STRAND_ERR_POLL_RET], %g7 ! restore return address
 	clr	%g1				! status = success
 9:
 	HVRET					! %g1 = status
@@ -3331,8 +3639,8 @@ ue_err_notrap:
 	BCLR_L2_BANK_EEN(%g6, CEEN, %g4, %g3)
 
 	! get err address into %g1
-	CPU_STRUCT(%g1)
-	add	%g1, CPU_CE_RPT + CPU_VBSC_ERPT, %g1
+	STRAND_STRUCT(%g1)
+	add	%g1, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g1
 	sllx	%g6, EVBSC_L2_AFAR_SHIFT, %g4
 	add	%g4, EVBSC_L2_AFAR, %g2
 	ldx	[%g1 + %g2], %g1
@@ -3374,8 +3682,8 @@ ue_err_notrap:
 	and	%g5, %g2, %g5			! compare only CEs
 
 	! get our copy
-	CPU_STRUCT(%g3)
-	add	%g3, CPU_CE_RPT + CPU_VBSC_ERPT, %g3
+	STRAND_STRUCT(%g3)
+	add	%g3, STRAND_CE_RPT + STRAND_VBSC_ERPT, %g3
 	sllx	%g6, EVBSC_L2_AFSR_SHIFT, %g4
 	add	%g4, EVBSC_L2_AFSR, %g4
 	ldx	[%g3 + %g4], %g4		! orig AFSR
@@ -3474,169 +3782,34 @@ ue_err_notrap:
 	SET_SIZE(err_determine_disposition)
 
 
-/*
- * remap_perm_addr
- * %g1 = I/D remap
- * all registers get garbled
- *
- * The cores should be idled at this point.  We can't grab the
- * spin lock to prevent any deadlocks.
- * We could hit the following scenarios due to not grabing the lock:
- *    - If the TTE was zerod by a perm-unmap then we wouldn't see it and the
- *      strand would demap when it was resumed.
- *    - If we saw bits in the table before they were put into hardware then
- *      we'd end up doing it twice.
- *    - We might not see a new entry due to the TTE being good but the cpuset
- *      not being updated; the strand when resumed would load it into the tlb
- */
-	ENTRY_NP(remap_perm_addr)
-	CPU_PUSH(%g7, %g3, %g4, %g2)		! save return addr
-	GUEST_STRUCT(%g7)
-	!! %g7 guestp
-
-	mov	%g1, %g2
-
 	/*
-	 * Search for valid perm mappings
-	 */
-	add	%g7, GUEST_PERM_MAPPINGS, %g1
-	mov	((NPERMMAPPINGS - 1) * MAPPING_SIZE), %g3
-	add	%g1, %g3, %g4
-.remap_perm_loop:
-	!! %g1 = base of mapping table
-	!! %g3 = current offset into table
-	!! %g4 = current entry in table
-	!! %g7 = guestp
-	ldx	[%g4 + MAPPING_TTE], %g5
-	brgez,pn %g5, .remap_perm_continue
-	nop
-
-	/* Found a valid mapping */
-	/* see if this map belongs to this core */
-	cmp	%g2, MAP_DTLB
-	move	%xcc, MAPPING_DCPUSET, %g7
-	movne	%xcc, MAPPING_ICPUSET, %g7
-	lduw	[%g4 + %g7], %g7
-	CPU_STRUCT(%g6)
-	ldub	[%g6 + CPU_PID], %g6
-	PCPUID2COREID(%g6, %g6)
-	sllx	%g6, CPUID_2_COREID_SHIFT, %g6	! %g6 * NSTRANDSPERCORE
-	srlx	%g7, %g6, %g7
-	btst	CORE_MASK, %g7
-	bz,pt %xcc, .remap_perm_continue
-	nop
-
-#ifdef NIAGARA_ERRATUM_40
-	/*
-	 * Use entry # in guest's permanent mapping table as position
-	 * in tlb, guarantees idx 63 not used (Niagara erratum 40).
-	 * We divide the tlb into 8 sets of 8 permanent mappings.
-	 * The guest's partid selects the set of 8.
-	 *
-	 * NB: partid 7 is not supported.
-	 */
-	GUEST_STRUCT(%g6)
-	ldx	[%g6 + GUEST_PARTID], %g1
-	inc	GUEST_PERM_MAPPINGS_LOCK, %g6
-	sub	%g4, %g6, %g6
-	udivx	%g6, MAPPING_SIZE, %g6
-	!! %g6 = tlb index #
-
-	sllx	%g1, 3, %g1	! partid * NPERMMAPPINGS
-	add	%g6, %g1, %g6	! tlbindex# + (partid * 8)
-
-	sllx	%g6, 3, %g6
-	!! %g6 = ASI_TLB_ACCESS va
-#endif
-	/*
-	 * Map in TLB
-	 */
-	btst	MAP_ITLB, %g2
-	bz,pn	%xcc, 1f
-	btst	MAP_DTLB, %g2
-
-	/* Set tag */
-	ldx	[%g4 + MAPPING_VA], %g5
-	mov	MMU_TAG_ACCESS, %g1
-	stxa	%g5, [%g1]ASI_IMMU
-	membar	#Sync
-
-	ldx	[%g4 + MAPPING_TTE], %g1
-
-	mov	1, %g5
-	sllx	%g5, NI_TTE4V_L_SHIFT, %g5
-	or	%g1, %g5, %g1	! add lock bit
-	set	TLB_IN_4V_FORMAT, %g5
-
-#ifdef NIAGARA_ERRATUM_40
-	!! %g6 still contains ASI_TLB_ACCESS va
-	stxa	%g1, [%g5 + %g6]ASI_ITLB_DATA_ACC
-#else
-	stxa	%g1, [%g5]ASI_ITLB_DATA_IN
-#endif
-	membar	#Sync
-
-	! condition codes still set
-1:	bz,pn	%xcc, 2f
-	nop
-
-	/* Set Tag */
-	ldx	[%g4 + MAPPING_VA], %g5
-	mov	MMU_TAG_ACCESS, %g1
-	stxa	%g5, [%g1]ASI_DMMU
-	membar	#Sync
-
-	ldx	[%g4 + MAPPING_TTE], %g1
-	mov	1, %g5
-	sllx	%g5, NI_TTE4V_L_SHIFT, %g5
-	or	%g1, %g5, %g1	! add lock bit
-	set	TLB_IN_4V_FORMAT, %g5
-#ifdef NIAGARA_ERRATUM_40
-	!! %g6 still contains ASI_TLB_ACCESS va
-	stxa	%g1, [%g5 + %g6]ASI_DTLB_DATA_ACC
-#else
-	stxa	%g1, [%g5]ASI_DTLB_DATA_IN
-#endif
-	membar	#Sync
-2:
-
-.remap_perm_continue:
-	GUEST_STRUCT(%g7)
-	add	%g7, GUEST_PERM_MAPPINGS, %g1
-	deccc	GUEST_PERM_MAPPINGS_INCR, %g3
-	bgeu,pt	%xcc, .remap_perm_loop
-	add	%g1, %g3, %g4
-
-	CPU_POP(%g7, %g1, %g2, %g5)
-	HVRET
-	SET_SIZE(remap_perm_addr)
-
-	/*
-	 * Handle cpu in error
+	 * Handle strand in error
 	 * All other strands are idle
-	 * This CPU:
-	 *   - search for another "good" cpu
+	 * This strand:
+	 *   - search for another "good" strand
 	 *   - flag as halted (bit mask)
 	 *   - Remove cyclic (Error Daemon)
 	 *   - handoff interrupt steering
 	 *   - Migrate all intrs
-	 *   - notify good cpu to finish rest of work 
+	 *   - notify good strand to finish rest of work 
 	 *   - put myself into idle
-	 * Selected Good CPU:
+	 * Selected Good strand:
 	 *   - send resumable error to guest
 	 * %g6 should not be clobbered
 	 */
-	ENTRY_NP(cpu_in_error)
+
+	ENTRY_NP(strand_in_error)
 
 	! Remove this cpu from the active bitmask and add it to halted 
-	CPU_STRUCT(%g1)
-	ldub	[%g1 + CPU_PID], %g5
+	STRAND_STRUCT(%g5)
+	ldub	[%g5 + STRAND_ID], %g5
 	mov	1, %g4
 	sllx	%g4, %g5, %g4
-    
-	!! %g1 - cpup
-	CPU2ROOT_STRUCT(%g1, %g2)		! config ptr
-	! clear this cpu from the active list
+
+	!! %g5 - strand id
+	ROOT_STRUCT(%g2)		! config ptr
+
+	! clear this strand from the active list
 	ldx	[%g2 + CONFIG_STACTIVE], %g3
 	bclr	%g4, %g3
 	stx	%g3, [%g2 + CONFIG_STACTIVE]
@@ -3646,83 +3819,72 @@ ue_err_notrap:
 	bset	%g4, %g3
 	stx	%g3, [%g2 + CONFIG_STHALT]
 
-	! pick another cpu from the idle list
-	mov	(NCPUS - 1), %g6
-.find_cpu_loop:
-	!! %g6 - current tgt cpu id
-	!! %g5 - this cpu id
-	! skip current cpu (don't want to pick myself)
-	cmp	%g6, %g5
-	be,pt	%xcc, .find_cpu_continue
-	nop
+	! find another idle strand for re-targetting
+	ldx	[%g2 + CONFIG_STIDLE], %g3
+	mov	0, %g6
+.find_strand:
+	cmp	%g5, %g6
+	be,pn	%xcc, .next_strand
+	mov	1, %g4
+	sllx	%g4, %g6, %g4	
+	andcc	%g3, %g4, %g0
+	bnz,a	%xcc, .found_a_strand
+	  nop
+
+.next_strand:
+	inc	%g6
+	cmp	%g6, NSTRANDS
+	bne,pn	%xcc, .find_strand
+	  nop
 
 	/*
-	 * At this point all "good" strands should be idle
-	 * A candidate cpu should meet the following requirements:
-	 * - idled
-	 * - running guest code
-	 * - have error buffers configured
-	 * If after checking all cpus non meet this criteria, we abort
-	 */ 
-	IS_STRAND_IDLE(%g1, %g6, %g4, %g3)
-	bz,pt	%xcc, .find_cpu_continue
-	nop
-	
-	! make sure the cpu is in guest code
-	PID2CPUP(%g6, %g4, %g3)
-	mov	CPU_STATE_RUNNING, %g3
-	ldx	[%g4 + CPU_STATUS], %g1
-	cmp	%g3, %g1
-	bne,pt	%xcc, .find_cpu_continue
-	nop
+	 * No usable active strands are left in the
+	 * system, force host exit
+	 */
+#ifdef CONFIG_VBSC_SVC
+	ba,a	vbsc_guest_exit
+#else
+        LEGION_EXIT(%o0)
+#endif
 
-	! check the error queues.. if not set, not a good candidate
-	ldx	[%g4 + CPU_ERRQR_BASE], %g3
-	brz,pt	%g3, .find_cpu_continue
-	nop
-
-	ba,a	.found_a_cpu
-
-.find_cpu_continue:
-	deccc	%g6
-	bge,pt	 %xcc, .find_cpu_loop 
-	nop
-	
-	! If we got here, we didn't find a good tgt cpu
-	brlz,a,pn %g6, hvabort
-	  mov	ABORT_NOTGTCPUS, %g1
-
-.found_a_cpu:
+.found_a_strand:
 	/*
 	 * handoff L2 Steering CPU
 	 * If we are the steering cpu, migrate it to our chosen one
 	 */
+
+	!! %g5 - this strand ID
+	!! %g6 - target strand ID
 	setx	L2_CONTROL_REG, %g3, %g4
 	ldx	[%g4], %g2			! current setting
 	srlx	%g2, L2_ERRORSTEER_SHIFT, %g3
-	and	%g3, (NCPUS -1), %g3
-	cmp	%g3, %g5			! is this steering cpu?
+	and	%g3, (NSTRANDS - 1), %g3
+	cmp	%g3, %g5			! is this steering strand ?
 	bnz,pt	%xcc, 1f
 	nop
 
-	! It is the L2 Steering cpu. Migrate responsibility to tgt cpu
+	! It is the L2 Steering strand. Migrate responsibility to tgt strand
 	sllx	%g3, L2_ERRORSTEER_SHIFT, %g3
-	andn	%g3, %g2, %g2			! remove this cpu
+	andn	%g3, %g2, %g2			! remove this strand
 	sllx	%g6, L2_ERRORSTEER_SHIFT, %g3
 	or	%g2, %g3, %g2
 	stx	%g2, [%g4]
-
 1:
+	mov	%g5, %g1
+	mov	%g6, %g2
+
+	!! %g1 - this strand ID
+	!! %g2 - target strand ID	
+#ifdef CONFIG_FPGA
 	/*
 	 * Migrate SSI intrs
 	 */
-	mov	%g5, %g1
-	mov	%g6, %g2
-	CPU_PUSH(%g1, %g3, %g4, %g5)
-	CPU_PUSH(%g2, %g3, %g4, %g5)
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(ssi_intr_redistribution)
-	CPU_POP(%g2, %g3, %g4, %g5)
-	CPU_POP(%g1, %g3, %g4, %g5)
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
+#endif
 
 #if 0 /* XXX */
 	/*
@@ -3735,89 +3897,186 @@ ue_err_notrap:
 	 * cpu_in_error_finish will invoke heartbeat_enable on the
 	 * remote cpu if the heartbeat was disabled.
 	 */
-	CPU_PUSH(%g1, %g3, %g4, %g5)
-	CPU_PUSH(%g2, %g3, %g4, %g5)
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(heartbeat_disable)
-	CPU_POP(%g2, %g3, %g4, %g5)
-	CPU_POP(%g1, %g3, %g4, %g5)
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
 
 #ifdef CONFIG_FIRE
 	/*
+	 * if this guest owns a fire bus, redirect
+	 * fire interrupts
+	 */
+	GUEST_STRUCT(%g3)
+	ROOT_STRUCT(%g4)
+	ldx	[%g4 + CONFIG_PCIE_BUSSES], %g4
+	! check leaf A
+	ldx	[%g4 + PCIE_DEVICE_GUESTP], %g5
+	cmp	%g3, %g5
+	be	%xcc, 2f
+	  nop
+	! check leaf B
+	ldx	[%g4 + PCIE_DEVICE_GUESTP + PCIE_DEVICE_SIZE], %g5
+	cmp	%g3, %g5
+	bne	%xcc, 3f
+	  nop
+2:
+	/*
 	 * Migrate fire intrs
 	 */
-	CPU_PUSH(%g1, %g3, %g4, %g5)
-	CPU_PUSH(%g2, %g3, %g4, %g5)
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(fire_intr_redistribution)
-	CPU_POP(%g2, %g3, %g4, %g5)
-	CPU_POP(%g1, %g3, %g4, %g5)
-
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
 	/*
 	 * Migrate fire err intrs
 	 */
-	CPU_PUSH(%g1, %g3, %g4, %g5)
-	CPU_PUSH(%g2, %g3, %g4, %g5)
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(fire_err_intr_redistribution)
-	CPU_POP(%g2, %g3, %g4, %g5)
-	CPU_POP(%g1, %g3, %g4, %g5)
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
+3:
 #endif
-
 	/*
 	 * Migrate vdev intrs
 	 */
-	CPU_PUSH(%g1, %g3, %g4, %g5)
-	CPU_PUSH(%g2, %g3, %g4, %g5)
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	HVCALL(vdev_intr_redistribution)
-	CPU_POP(%g2, %g3, %g4, %g5)
-	CPU_POP(%g1, %g3, %g4, %g5)
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
 
-	!! %g1 this cpu id
-	!! %g2 tgt cpu id
-	mov	%g1, %g5
-	mov	%g2, %g6
+	/*
+	 * Now pick another VCPU in this guest to target the erpt
+	 * Ensure that the VCPU is not bound to the strand in error
+	 */
+	VCPU_STRUCT(%g1)
+	GUEST_STRUCT(%g2)
+	add	%g2, GUEST_VCPUS, %g2
+	mov	0, %g3
 
+	!! %g1 - this vcpu struct
+	!! %g2 - array of vcpus in guest
+	!! %g3 - vcpu array idx
+.find_cpu_loop:
+	ldx	[%g2], %g4		! vcpu struct
+	brz,pn	%g4, .find_cpu_continue
+	  nop
+
+	! ignore this vcpu
+	cmp	%g4, %g1
+	be,pn	%xcc, .find_cpu_continue
+	  nop
+
+	! check whether this CPU is running guest code ?
+	ldx     [%g4 + CPU_STATUS], %g6
+	cmp	%g6, CPU_STATE_RUNNING
+	bne,pt	%xcc, .find_cpu_continue
+	  nop
+
+	! check the error queues.. if not set, not a good candidate
+	ldx	[%g4 + CPU_ERRQR_BASE], %g6
+	brz,pt	%g6, .find_cpu_continue
+	  nop
+
+	/*
+	 * find the strand this vcpu is ON, make sure it is idle
+	 * NOTE: currently this check is not necessary, more
+	 * likely when we have sub-strand scheduling
+	 */
+	!! %g1 - this vcpu struct
+	!! %g2 - curr vcpu in guest vcpu array
+	!! %g3 - vcpu array idx
+	!! %g4 - target vcpus struct
+	STRAND_STRUCT(%g5)			! this strand
+	ldx	[%g4 + CPU_STRAND], %g6		! vcpu->strand
+	cmp	%g5, %g6
+	be,pn	%xcc, .find_cpu_continue
+	  nop
+
+	! check if the target strand is IDLE
+	ldub	[%g6 + STRAND_ID], %g6		! vcpu->strand->id
+	mov	1, %g5
+	sllx	%g5, %g6, %g6
+	VCPU2ROOT_STRUCT(%g1, %g5)
+	ldx	[%g5 + CONFIG_STIDLE], %g5
+	btst	%g5, %g6
+	bnz,pt	%xcc, .found_a_cpu
+	  nop
+
+.find_cpu_continue:
+	add	%g2, GUEST_VCPUS_INCR, %g2
+	inc	%g3
+	cmp	%g3, NVCPUS
+	bne,pn	%xcc, .find_cpu_loop
+	  nop
+	
+	! If we got here, we didn't find a good tgt cpu
+	! do not send an erpt, exit the guest
+	
+	HVCALL(guest_exit)
+	
+	ba,a	.skip_sending_erpt
+
+.found_a_cpu:
+	!! %g4 - target vcpu struct
 	/*
 	 * This cpu has most of the information to send to the Guest.
 	 * We copy from this cpu err rpt to the tgt's err rpt
 	 */
-	! get this cpu erpt
-	CPU_STRUCT(%g1)
-	CPU_ERPT_STRUCT(CPU_UE_RPT, %g1, %g1)
+	STRAND_STRUCT(%g1)				! this strand
+	STRAND2ERPT_STRUCT(STRAND_UE_RPT, %g1, %g1)
 
-	! get tgt cpu erpt
-	PID2CPUP(%g6, %g2, %g3)
-	CPU2ERPT_STRUCT(CPU_CE_RPT, %g2, %g3)
-	
+	! get tgt strand ce erpt
+	ldx	[%g4 + CPU_STRAND], %g2			! tgt_vcpu->strand
+	STRAND2ERPT_STRUCT(STRAND_CE_RPT, %g2, %g3)
+
 	! copy info to tgt cpu ce err buf
-	ldx	[%g1 + CPU_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
-	stx	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_G_EHDL]
-	ldx	[%g1 + CPU_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
-	stx	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_G_STICK]
-	ld	[%g1 + CPU_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
-	st	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_EDESC]
-	ld	[%g1 + CPU_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
-	st	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_ATTR]
-	ldx	[%g1 + CPU_SUN4V_ERPT + ESUN4V_RA], %g4		! ra
-	stx	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_RA]
-	ld	[%g1 + CPU_SUN4V_ERPT + ESUN4V_SZ], %g4		! sz
-	st	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_SZ]
-	lduh	[%g1 + CPU_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
-	stuh	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_G_CPUID]
-	lduh	[%g1 + CPU_SUN4V_ERPT + ESUN4V_G_SECS], %g4
-	stuh	%g4, [%g3 + CPU_SUN4V_ERPT + ESUN4V_G_SECS]
+	ldx	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL], %g4	! ehdl
+	stx	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL]
+	ldx	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK], %g4	! stick
+	stx	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK]
+	ld	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_EDESC], %g4	! edesc
+	st	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_EDESC]
+	ld	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g4	! attr
+	st	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_ATTR]
+	ldx	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_ADDR], %g4	! ra
+	stx	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_ADDR]
+	ld	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_SZ], %g4	! sz
+	st	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
+	lduh	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID], %g4	! cpuid
+	stuh	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID]
+	lduh	[%g1 + STRAND_SUN4V_ERPT + ESUN4V_G_SECS], %g4
+	stuh	%g4, [%g3 + STRAND_SUN4V_ERPT + ESUN4V_G_SECS]
 
 	/*
-	 * Send a xcall to the target cpu so it can finish the work
+	 * Send a xcall to the target strand so it can finish the work
 	 */
+	ldub	[%g2 + STRAND_ID], %g6			! tgt strand id
 	sllx	%g6, INT_VEC_DIS_VCID_SHIFT, %g5
 	or	%g5, VECINTR_CPUINERR, %g5
 	stxa	%g5, [%g0]ASI_INTR_UDB_W
 
-	CPU_STRUCT(%g6)
+.skip_sending_erpt:
+	STRAND_STRUCT(%g6)
 	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
 
+	! remove self from idle list
+	STRAND_STRUCT(%g1)
+	ldub	[%g1 + STRAND_ID], %g6	/* phys id */
+	mov	1, %g1
+	sllx	%g1, %g6, %g1
+	ROOT_STRUCT(%g6)
+	ldx	[%g6 + CONFIG_STIDLE], %g5
+	bclr	%g1, %g5
+	stx	%g5, [%g6 + CONFIG_STIDLE]
+
 	! idle myself
-	CPU_STRUCT(%g1)
-	ldub	[%g1 + CPU_PID], %g6
+	STRAND_STRUCT(%g1)
+	ldub	[%g1 + STRAND_ID], %g6	/* phys id */
 	INT_VEC_DSPCH_ONE(INT_VEC_DIS_TYPE_IDLE, %g6, %g3, %g4)
 
 	/*
@@ -3826,6 +4085,206 @@ ue_err_notrap:
 	 * hvabort to catch the mistake
 	 */
 	ba	hvabort
-	mov	ABORT_INTERNAL_CORRUPT, %g1
+	rd	%pc, %g1
 
-	SET_SIZE(cpu_in_error)
+	SET_SIZE(strand_in_error)
+
+	ENTRY(ssi_mondo)
+	
+	/*
+	 * Check for JBUS error
+	 */
+	setx	JBI_ERR_LOG, %g1, %g2
+	ldx	[%g2], %g2
+	brnz,pn %g2, ue_jbus_err
+	nop
+
+	/*
+	 * Clear the INT_CTL.MASK bit for the SSI
+	 */
+	setx	IOBBASE, %g3, %g2
+        stx	%g0, [%g2 + INT_CTL + INT_CTL_DEV_OFF(IOBDEV_SSIERR)]
+
+	retry
+
+	SET_SIZE(ssi_mondo)
+
+	/*
+	 * re-route an error report (cont'd)
+	 * 3. select one of the active CPUs for that guest
+	 * 4. Copy the data from the error erport into that
+	 *    CPUs cpu struct
+	 * 5. Send a VECINTR_ERROR_XCALL to that CPU
+	 * 6: RETRY
+	 *
+	 * %g2	target guest
+	 * %g4	PA
+	 */
+
+	/* FIXME: re-whack this for vcpu/strand split */
+
+	ENTRY_NP(cpu_reroute_error)
+
+	/*
+         * find first live cpu in guest->vcpus
+	 * Then deliver the error to that vcpu, and interrupt
+	 * the strand it is running on to make that happen.
+         */
+	add	%g2, GUEST_VCPUS, %g2
+	mov	0, %g3
+1:
+	cmp	%g3, NVCPUS
+	be,pn	%xcc, cpu_reroute_error_exit
+	  nop
+
+	mulx	%g3, GUEST_VCPUS_INCR, %g5
+	ldx	[%g2 + %g5], %g1
+	brz,a,pn %g1, 1b
+	  inc	%g3
+	! check whether this CPU is running guest code ?
+	ldx     [%g1 + CPU_STATUS], %g5
+	cmp	%g5, CPU_STATE_RUNNING
+	bne,pt	%xcc, 1b
+	  inc	%g3
+	
+	! %g3	target vcpu id
+	! %g1	&vcpus[target]
+
+	ldx	[%g1 + CPU_STRAND], %g1
+
+	/*
+	 * It is possible that the CPUs rerouted data is already in use.
+	 * We use the rerouted_addr field as a spinlock. The target CPU
+	 * will set this to 0 after reading the error data allowing us
+	 * to re-use the rerouting fields.
+	 * See cpu_err_rerouted() below.
+	 *
+	 * %g1	&strands[target]
+	 * %g3	target cpuid
+	 * %g4	PA
+	 */
+	set	STRAND_REROUTED_ADDR, %g2
+	add	%g1, %g2, %g6
+1:	casx	[%g6], %g0, %g4
+	brnz,pn	%g4, 1b
+	nop
+
+
+	! get the data out of the current STRAND's ce_rpt buf and store
+	! in the target STRAND struct
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, %g6, %g5)   ! g6->strand, g5->strand.ce_rpt
+	ldx     [%g5 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL], %g6
+	set	STRAND_REROUTED_EHDL, %g4
+	stx	%g6, [%g1 + %g4]
+	lduw    [%g5 + STRAND_SUN4V_ERPT + ESUN4V_ATTR], %g6
+	set	STRAND_REROUTED_ATTR, %g4
+	stx	%g6, [%g1 + %g4]
+	ldx     [%g5 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK], %g6
+	! STICK is probably not necssary. I doubt if FMA checks
+	! both EHDL/STICK when looking for duplicate reports,
+	! but it doesn't kill us to do it.
+	set	STRAND_REROUTED_STICK, %g4
+	stx	%g6, [%g1 + %g4]
+
+	! send an x-call to the target CPU
+	ldub	[%g1 + STRAND_ID], %g3
+	sllx    %g3, IVDR_THREAD, %g3
+	mov     VECINTR_ERROR_XCALL, %g5
+	or      %g3, %g5, %g3
+	stxa    %g3, [%g0]ASI_INTR_UDB_W
+cpu_reroute_error_exit:
+	! error is re-routed, get out of here
+	STRAND_STRUCT(%g6)
+	SPINLOCK_RESUME_ALL_STRAND(%g6, %g1, %g2, %g3, %g4)
+
+	ldx	[%g6 + STRAND_ERR_RET], %g7	! get return address
+	brnz,a	%g7, .ue_return			!   valid: clear it & return
+	  stx	%g0, [%g6 + STRAND_ERR_RET]		!           ..
+
+	retry
+
+	SET_SIZE(cpu_reroute_error)
+
+	/*
+	 * An error has been re-routed to this STRAND.
+	 * The EHDL/ADDR/STICK/ATTR have been stored in the STRAND struct
+	 * by the STRAND that originally detected the error.
+	 *
+	 * Note: STICK may not be strictly necessary
+	 */
+	ENTRY_NP(cpu_err_rerouted)
+
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, %g6, %g5)	! g6->strand, g5->strand.ce_rpt
+#ifdef DEBUG_ERROR_REROUTING
+	PRINT("Error Re-routed to CPU strand ");
+	ldub	[%g6 + STRAND_ID], %g4
+	PRINTX(%g4)
+	PRINT("\r\n");
+#endif
+
+	set	STRAND_REROUTED_EHDL, %g4
+	ldx	[%g6 + %g4], %g4
+	stx     %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL]	
+
+	set	STRAND_REROUTED_STICK, %g4
+	ldx	[%g6 + %g4], %g4
+	stx     %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_G_STICK]
+
+	set	STRAND_REROUTED_ATTR, %g4
+	ldx	[%g6 + %g4], %g4
+	stw     %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_ATTR]
+
+	! keep ADDR after EHDL/STICK/ATTR to avoid race
+	set	STRAND_REROUTED_ADDR, %g4
+	ldx	[%g6 + %g4], %g1
+	 ! Clear the strand->rerouted-addr field now to let other
+	 ! errors in.
+	stx	%g0, [%g6 + %g4]
+	 ! Translate the PA to a guest RA
+	VCPU_STRUCT(%g6)
+	CPU_ERR_PA_TO_RA(%g6, %g1, %g4, %g2, %g3)
+	stx     %g1, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_ADDR]
+
+	ldub    [%g6 + CPU_VID], %g4				/* guest cpuid */
+	stuh    %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID]
+
+	set     EDESC_UE_RESUMABLE, %g4
+	stw     %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_EDESC]
+
+	mov     ERPT_MEM_SIZE, %g4
+	st      %g4, [%g5 + STRAND_SUN4V_ERPT + ESUN4V_SZ]
+
+	/*
+	 * gueue a resumable error report and return
+	 */
+	ASMCALL_RQ_ERPT(STRAND_CE_RPT, %g1, %g2, %g3, %g4, %g5, %g6, %g7)
+
+	retry
+
+	SET_SIZE(cpu_err_rerouted)
+
+
+	ENTRY_NP(hvabort)
+	mov	%g1, %g6
+	HV_PRINT_NOTRAP("ABORT: Failure 0x");
+	HV_PRINTX_NOTRAP(%g6)
+#ifdef CONFIG_VBSC_SVC
+	HV_PRINT_NOTRAP(", contacting vbsc\r\n");
+	ba,pt   %xcc, vbsc_hv_abort
+	  mov	%g6, %g1
+
+#else
+	HV_PRINT_NOTRAP(", spinning\r\n");
+	LEGION_EXIT(1)
+2:	ba,a	2b
+	  nop
+#endif
+	SET_SIZE(hvabort)
+
+
+	! intended never to return
+	ENTRY(c_hvabort)
+	mov	%o7, %g1
+	ba	hvabort
+	  nop
+	SET_SIZE(c_hvabort)

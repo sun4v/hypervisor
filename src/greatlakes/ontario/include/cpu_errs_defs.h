@@ -49,7 +49,7 @@
 #ifndef _NIAGARA_CPU_ERRS_DEFS_H
 #define	_NIAGARA_CPU_ERRS_DEFS_H
 
-#pragma ident	"@(#)cpu_errs_defs.h	1.8	06/05/30 SMI"
+#pragma ident	"@(#)cpu_errs_defs.h	1.10	07/02/22 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,7 +115,6 @@ struct dram {
 
 struct js {
 	uint64_t	jbi_err_config;
-	uint64_t	jbi_err_log;
 	uint64_t	jbi_err_ovf;
 	uint64_t	jbi_log_enb;
 	uint64_t	jbi_sig_enb;
@@ -175,13 +174,14 @@ struct evbsc {
 	uint8_t		tl;		/* Value of %tl */
 	uint8_t		erren;		/* error enable setting */
 	uint16_t	pad1;		/* pad1 */
+	uint64_t	jbi_err_log;	/* JBI error status reg */
 	union diag_buf	ediag_buf;	/* buffer */
 };
 
-struct cpuerpt {
-	struct sun4v_cpu_erpt cpu_sun4v_erpt;	/* error report pkt to sun4v */
-	struct evbsc	cpu_vbsc_erpt;	/* error report pkt to vbsc */
-	int		unsent_pkt;	/* make pkt to be sent */
+struct strand_erpt {
+	struct sun4v_cpu_erpt strand_sun4v_erpt; /* error report pkt to sun4v */
+	struct evbsc	strand_vbsc_erpt;	 /* error report pkt to vbsc */
+	int		unsent_pkt;		 /* make pkt to be sent */
 };
 #endif /* ASM */
 

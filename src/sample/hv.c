@@ -42,32 +42,57 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)hv.c	1.5	04/11/23 SMI"
+#pragma ident	"@(#)hv.c	1.7	07/06/07 SMI"
 
 #include <hypervisor.h>
 #include <sys/types.h>
 
+extern int hv_core_trap(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, int);
 extern int hv_fast_trap(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, int);
 extern int hv_trap(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, int);
 
 int
+hv_set_version(uint64_t group, uint64_t major, uint64_t minor)
+{
+	return (hv_core_trap(group, major, minor, 0, 0, API_SET_VERSION));
+}
+
+int
+hv_core_exit(uint64_t code)
+{
+	return (hv_core_trap(code, 0, 0, 0, 0, API_EXIT));
+}
+
+int
+hv_core_putchar(char c)
+{
+	return (hv_core_trap(c, 0, 0, 0, 0, API_PUTCHAR));
+}
+
+int
 hv_cons_putchar(char c)
 {
-	return hv_fast_trap(c, 0, 0, 0, 0, CONS_PUTCHAR);
+	return (hv_fast_trap(c, 0, 0, 0, 0, CONS_PUTCHAR));
 }
 
 int
 hv_mmu_map_addr(uint64_t va, int ctx, uint64_t tte, int flags)
 {
-	return hv_trap(va, ctx, tte, flags, 0, MMU_MAP_ADDR);
+	return (hv_trap(va, ctx, tte, flags, 0, MMU_MAP_ADDR));
 }
 
 int
 hv_mmu_demap_page(uint64_t va, int ctx, int flags)
 {
-	return hv_trap(va, ctx, flags, 0, 0, MMU_UNMAP_ADDR);
+	return (hv_trap(va, ctx, flags, 0, 0, MMU_UNMAP_ADDR));
+}
+
+void
+api_version_init()
+{
+	hv_set_version(API_GROUP_CORE, 1, 0);
 }

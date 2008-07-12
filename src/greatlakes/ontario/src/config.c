@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)config.c	1.25	06/05/30 SMI"
+#pragma ident	"@(#)config.c	1.31	07/05/03 SMI"
 
 /*
  * Guest configuration
@@ -57,15 +57,18 @@
 #include <traps.h>
 #include <cache.h>
 #include <mmu.h>
-#include <sun4v/errs_defs.h>
-#include <cpu_errs_defs.h>
-#include <cpu_errs.h>
-#include <vpci_errs_defs.h>
+#include <vdev_ops.h>
+#include <vdev_intr.h>
+#include <config.h>
 #include <ncs.h>
 #include <cyclic.h>
-#include <cpu.h>
+#include <vcpu.h>
+#include <strand.h>
 #include <guest.h>
-#include <vdev_ops.h>
+#include <memory.h>
+#include <pcie.h>
+#include <fire.h>
+#include <ldc.h>
 
 #define	DEVOPS(n)	DEVOPS_##n
 
@@ -89,6 +92,15 @@ extern void vdev_intr_gettarget(void);
 extern void vdev_intr_getstate(void);
 extern void vdev_intr_setstate(void);
 
+extern void ldc_vintr_getcookie(void);
+extern void ldc_vintr_setcookie(void);
+extern void ldc_vintr_getvalid(void);
+extern void ldc_vintr_setvalid(void);
+extern void ldc_vintr_gettarget(void);
+extern void ldc_vintr_settarget(void);
+extern void ldc_vintr_getstate(void);
+extern void ldc_vintr_setstate(void);
+
 #if defined(CONFIG_FIRE)
 
 extern const uint64_t fire_a_iotsb;
@@ -96,7 +108,6 @@ extern const uint64_t fire_a_equeue;
 extern const uint64_t fire_b_iotsb;
 extern const uint64_t *fire_b_equeue;
 extern const uint64_t fire_virtual_intmap;
-extern const struct fire_cookie fire_dev[];
 
 #define	FIRE_EQ(leaf, n) \
 	.base = (uint64_t *)&fire_##leaf##_equeue+(n*0x400), \
@@ -156,7 +167,7 @@ const struct fire_err_cookie fire_err[NFIRELEAVES] = {
 	{ .fire = FIRE_DEV_COOKIE(B), },
 };
 
-const struct fire_cookie fire_dev[NFIRELEAVES] = {
+const fire_dev_t fire_dev[NFIRELEAVES] = {
 	{	/* Fire Leaf AID = 0x1e */
 		.inomax	= NFIREDEVINO,
 		.vino	= AID2VINO(A),
@@ -219,45 +230,29 @@ const struct fire_cookie fire_dev[NFIRELEAVES] = {
 
 
 struct config config;
-struct core cores[NCORES];
-struct cpu cpus[NCPUS];
-struct guest guests[NGUESTS];
-uint8_t hcall_tables[NGUESTS * HCALL_TABLE_SIZE + L2_LINE_SIZE-1];
 
-const struct vino2inst vino2inst[NDEVIDS] = {
-	VINO_HANDLER(RESERVED), /* VINO   0 -  3f */
-	VINO_HANDLER(RESERVED), /* VINO  40 -  7f */
-	VINO_HANDLER(RESERVED), /* VINO  80 -  bf */
-	VINO_HANDLER(RESERVED), /* VINO  c0 -  ff */
-	VINO_HANDLER_VDEV,	/* VINO 100 - 13f */
-	VINO_HANDLER(RESERVED), /* VINO 140 - 17f */
-	VINO_HANDLER(RESERVED), /* VINO 180 - 1bf */
-	VINO_HANDLER(RESERVED), /* VINO 1c0 - 1ff */
-	VINO_HANDLER(RESERVED), /* VINO 200 - 23f */
-	VINO_HANDLER(RESERVED), /* VINO 240 - 27f */
-	VINO_HANDLER(RESERVED), /* VINO 280 - 2bf */
-	VINO_HANDLER(RESERVED), /* VINO 2c0 - 2ff */
-	VINO_HANDLER(RESERVED), /* VINO 300 - 33f */
-	VINO_HANDLER(RESERVED), /* VINO 340 - 37f */
-	VINO_HANDLER(RESERVED), /* VINO 380 - 3bf */
-	VINO_HANDLER(RESERVED), /* VINO 3c0 - 3ff */
-	VINO_HANDLER(RESERVED), /* VINO 400 - 43f */
-	VINO_HANDLER(RESERVED), /* VINO 440 - 47f */
-	VINO_HANDLER(RESERVED), /* VINO 480 - 4bf */
-	VINO_HANDLER(RESERVED), /* VINO 4c0 - 4ff */
-	VINO_HANDLER(RESERVED), /* VINO 500 - 53f */
-	VINO_HANDLER(RESERVED), /* VINO 540 - 57f */
-	VINO_HANDLER(RESERVED), /* VINO 580 - 5bf */
-	VINO_HANDLER(RESERVED), /* VINO 5c0 - 5ff */
-	VINO_HANDLER(RESERVED), /* VINO 600 - 63f */
-	VINO_HANDLER(RESERVED), /* VINO 640 - 67f */
-	VINO_HANDLER(RESERVED), /* VINO 680 - 6bf */
-	VINO_HANDLER(RESERVED), /* VINO 6c0 - 6ff */
-	VINO_HANDLER(RESERVED), /* VINO 700 - 73f */
-	VINO_HANDLER(RESERVED), /* VINO 740 - 77f */
-	VINO_HANDLER_FIRE(A),	/* VINO 780 - 7bf */
-	VINO_HANDLER_FIRE(B),	/* VINO 7c0 - 7ff */
-};
+#ifdef CONFIG_CRYPTO
+struct mau maus[NMAUS];
+#endif /* CONFIG_CRYPTO */
+
+vcpu_t		vcpus[NVCPUS];
+strand_t	strands[NSTRANDS];
+mblock_t	mblocks[NMBLOCKS];
+
+#ifdef CONFIG_PCIE
+pcie_device_t	pcie_bus[NUM_PCIE_BUSSES];
+#endif
+
+struct guest guests[NGUESTS];
+
+uint8_t hcall_tables[NGUESTS * HCALL_TABLE_SIZE + L2_LINE_SIZE-1];
+struct ldc_endpoint hv_ldcs[MAX_HV_LDC_CHANNELS];
+struct sp_ldc_endpoint sp_ldcs[MAX_SP_LDC_CHANNELS];
+
+/* BEGIN CSTYLED */
+#pragma align 64 (cons_queues)
+struct guest_console_queues cons_queues[NGUESTS];
+/* END CSTYLED */
 
 struct devopsvec fire_dev_ops = { FIRE_DEV_OPS };
 struct devopsvec fire_int_ops = { FIRE_INT_OPS };
@@ -265,6 +260,8 @@ struct devopsvec fire_msi_ops = { FIRE_MSI_OPS };
 struct devopsvec fire_err_int_ops = { FIRE_ERR_OPS };
 
 struct devopsvec vdev_ops = { VDEV_OPS };
+
+struct devopsvec cdev_ops = { CDEV_OPS };
 
 /*
  * vino2inst and dev2inst arrays contain indexes
@@ -274,7 +271,7 @@ struct devopsvec vdev_ops = { VDEV_OPS };
  *
  * dev2inst array is used to go from devID => inst
  */
-struct devinst devinstances[256] = {
+struct devinst devinstances[NDEV_INSTS] = {
 	{ 0, 0 },
 	{ .cookie = FIRE_DEV_COOKIE(A), .ops = &fire_dev_ops },
 	{ .cookie = FIRE_DEV_COOKIE(B), .ops = &fire_dev_ops },
@@ -290,41 +287,13 @@ struct devinst devinstances[256] = {
 
 	{ .cookie = 0, .ops = &vdev_ops },
 
+	{ .cookie = 0, .ops = &cdev_ops },
+
 	{ 0, 0 },
 
 };
 
-uint8_t dev2inst[NDEVIDS] = {
-	DEVOPS(RESERVED),	/*  0 */
-	DEVOPS(RESERVED),	/*  1 */
-	DEVOPS(RESERVED),	/*  2 */
-	DEVOPS(RESERVED),	/*  3 */
-	DEVOPS(VDEV),		/*  4 */
-	DEVOPS(RESERVED),	/*  5 */
-	DEVOPS(RESERVED),	/*  6 */
-	DEVOPS(RESERVED),	/*  7 */
-	DEVOPS(RESERVED),	/*  8 */
-	DEVOPS(RESERVED),	/*  9 */
-	DEVOPS(RESERVED),	/*  a */
-	DEVOPS(RESERVED),	/*  b */
-	DEVOPS(RESERVED),	/*  c */
-	DEVOPS(RESERVED),	/*  d */
-	DEVOPS(RESERVED),	/*  e */
-	DEVOPS(RESERVED),	/*  f */
-	DEVOPS(RESERVED),	/* 10 */
-	DEVOPS(RESERVED),	/* 11 */
-	DEVOPS(RESERVED),	/* 12 */
-	DEVOPS(RESERVED),	/* 13 */
-	DEVOPS(RESERVED),	/* 14 */
-	DEVOPS(RESERVED),	/* 15 */
-	DEVOPS(RESERVED),	/* 16 */
-	DEVOPS(RESERVED),	/* 17 */
-	DEVOPS(RESERVED),	/* 18 */
-	DEVOPS(RESERVED),	/* 19 */
-	DEVOPS(RESERVED),	/* 1a */
-	DEVOPS(RESERVED),	/* 1b */
-	DEVOPS(RESERVED),	/* 1c */
-	DEVOPS(RESERVED),	/* 1d */
-	DEVOPS(FIRE_A),		/* 1e */
-	DEVOPS(FIRE_B)		/* 1f */
+const struct vino_pcie config_pcie_vinos = {
+	VINO_HANDLER_FIRE(A),
+	VINO_HANDLER_FIRE(B)
 };

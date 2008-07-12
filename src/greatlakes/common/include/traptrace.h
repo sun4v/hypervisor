@@ -42,23 +42,24 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _TRAPTRACE_H
 #define	_TRAPTRACE_H
 
-#pragma ident	"@(#)traptrace.h	1.3	05/03/23 SMI"
+#pragma ident	"@(#)traptrace.h	1.5	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <platform/traptrace.h>
+
+/* BEGIN CSTYLED */
 #define	TTRACE_PTR(tmp, ptr, label_notconf, label_frz)	\
-	mov	HSCRATCH0, tmp				;\
-	ldxa	[tmp]ASI_HSCRATCHPAD, tmp		;\
-	ldx	[tmp + CPU_GUEST], ptr			;\
+	VCPU_GUEST_STRUCT(tmp, ptr)			;\
 	ldx	[ptr + GUEST_TTRACE_FRZ], ptr		;\
 	brnz,pn	ptr, label_frz				;\
 	 nop						;\
@@ -70,8 +71,7 @@ extern "C" {
 	add	tmp, ptr, ptr
 
 #define	TTRACE_NEXT(ptr, scr0, scr1, scr2)		 \
-	mov	HSCRATCH0, scr0				;\
-	ldxa	[scr0]ASI_HSCRATCHPAD, scr0		;\
+	VCPU_STRUCT(scr0)				;\
 	ldx	[scr0 + CPU_TTRACEBUF_SIZE], scr2	;\
 	ldx	[scr0 + CPU_TTRACEBUF_PA], scr0		;\
 	sub	ptr, scr0, scr1				;\
@@ -80,8 +80,7 @@ extern "C" {
 	cmp	scr1, scr2				;\
 	movge	%xcc, TTRACE_RECORD_SIZE, scr1		;\
 	stx	scr1, [scr0 + TTRACE_HEADER_OFFSET]	;\
-	mov	HSCRATCH0, scr2				;\
-	ldxa	[scr2]ASI_HSCRATCHPAD, scr2		;\
+	VCPU_STRUCT(scr2)				;\
 	stx	scr1, [scr2 + CPU_TTRACE_OFFSET]
 
 #define	TTRACE_NEXTPTR(ptr, scr0, scr1, scr2)		 \
@@ -95,7 +94,7 @@ extern "C" {
 	stb	scr0, [ptr + TTRACE_ENTRY_TYPE]		;\
 	rdpr	%tl, scr0				;\
 	stb	scr0, [ptr + TTRACE_ENTRY_TL]		;\
-	rdpr	%gl, scr0				;\
+	GET_ERR_GL(scr0)				;\
 	stb	scr0, [ptr + TTRACE_ENTRY_GL]		;\
 	rdpr	%tt, scr0				;\
 	sth	scr0, [ptr + TTRACE_ENTRY_TT]		;\
@@ -112,14 +111,17 @@ extern "C" {
 	stb	scr1, [ptr + TTRACE_ENTRY_HPSTATE]	;\
 	rdpr	%tpc, scr0				;\
 	stx	scr0, [ptr + TTRACE_ENTRY_TPC]
+/* END CSTYLED */
 
 #define	TTRACE_HPSTATE_TLZ	1
 #define	TTRACE_HPSTATE_ENB	2
 
+/* BEGIN CSTYLED */
 #define	TTRACE_CHK_BUF(cpu, ttbufsize, label)		\
 	ldx	[cpu + CPU_TTRACEBUF_SIZE], ttbufsize	;\
 	brz,pn	ttbufsize, label			;\
 	nop
+/* END CSTYLED */
 
 #ifdef __cplusplus
 }

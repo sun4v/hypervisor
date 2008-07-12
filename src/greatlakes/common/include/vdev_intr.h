@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _VDEV_INTR_H
 #define	_VDEV_INTR_H
 
-#pragma ident	"@(#)vdev_intr.h	1.7	06/04/26 SMI"
+#pragma ident	"@(#)vdev_intr.h	1.13	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +57,7 @@ extern "C" {
 
 #include <hypervisor.h>
 #include <hprivregs.h>
+#include <intr.h>
 
 /* BEGIN CSTYLED */
 
@@ -109,6 +110,16 @@ extern "C" {
 #define	NINOSPERDEV	64
 #define	DEVINOMASK	(NINOSPERDEV - 1)
 #define	NVINOS		(NINOSPERDEV * NDEVIDS)
+#define NFIREDEVS	2
+
+
+/*
+ * Number of devinstances
+ * defined to be <= 256 so a single byte
+ * can be used to hold an index value to this table.
+ */
+
+#define	NDEV_INSTS	256
 
 #define	DEVCFGPA_MASK	0x1f
 #define	DEVCFGPA_SHIFT	6
@@ -135,7 +146,7 @@ extern "C" {
 #define	DEVINST2COOKIE(guest, devinst, cookie, scr, faillabel)	\
 	brz,pn	devinst, faillabel			;\
 	sllx	devinst, DEVINST_SIZE_SHIFT, cookie	;\
-	ldx	[guest + GUEST_ROOT], scr		;\
+	ldx	[guest + GUEST_CONFIGP], scr		;\
 	ldx	[scr + CONFIG_DEVINSTANCES], scr	;\
 	add	scr, cookie, cookie			;\
 	ldx	[cookie + DEVINST_COOKIE], cookie
@@ -143,26 +154,28 @@ extern "C" {
 /*
 * Find the "opsvec" structure for devhandle "handle"
 */
-#define	DEVHANDLE2DEVINST(handle, opsvec)	\
-	srlx	handle, DEVCFGPA_SHIFT, opsvec	;\
+#define	_DEVHANDLE2DEVINST(handle, opsvec, faillabel)	\
+	btst	DEVINOMASK, handle			;\
+	bnz,pn	%xcc, faillabel				;\
+	srlx	handle, DEVCFGPA_SHIFT, opsvec		;\
 	and	opsvec, DEVIDMASK, opsvec 
 
-#define	DEVINST2INDEX(guest, devinst, index, scr, label)	\
-	add	guest, GUEST_DEV2INST, scr	;\
-	ldub	[scr + devinst], index		;\
-	brz	index, label			;\
+#define	DEVINST2INDEX(guest, devinst, index, scr, faillabel) \
+	add	guest, GUEST_DEV2INST, scr		;\
+	ldub	[scr + devinst], index			;\
+	brz	index, faillabel			;\
 	nop
 
-#define	DEVHANDLE2OPSVEC(guest, handle, opsvec, scr, label)	\
-	DEVHANDLE2DEVINST(handle, opsvec)	;\
-	DEVINST2INDEX(guest, opsvec, opsvec, scr, label)
+#define	_DEVHANDLE2OPSVEC(guest, handle, opsvec, scr, faillabel) \
+	_DEVHANDLE2DEVINST(handle, opsvec, faillabel)	;\
+	DEVINST2INDEX(guest, opsvec, opsvec, scr, faillabel)
 
 /*
  * Jump to a opsvec[devop] with a pointer to the "cookie"
  */
-#define	JMPL_DEVOP(guest, devinst, devop, cookie, faillabel) \
+#define	_JMPL_DEVOP(guest, devinst, devop, cookie, faillabel) \
 	sllx	devinst, DEVINST_SIZE_SHIFT, devinst	;\
-	ldx	[guest + GUEST_ROOT], cookie		;\
+	ldx	[guest + GUEST_CONFIGP], cookie		;\
 	ldx	[cookie + CONFIG_DEVINSTANCES], cookie	;\
 	add	cookie, devinst, cookie			;\
 	ldx	[cookie + DEVINST_OPS], devinst		;\
@@ -170,6 +183,7 @@ extern "C" {
 	ldx	[cookie + DEVINST_COOKIE], cookie	;\
 	ldx	[devinst + devop], devinst		;\
 	brz,pn	devinst, faillabel			;\
+	nop						;\
 	jmpl	devinst, %g0				;\
 	nop
 
@@ -179,15 +193,15 @@ extern "C" {
 #define	JMPL_VINO2DEVOP(vino, devop, cookie, scr, label) \
 	GUEST_STRUCT(cookie)				;\
 	VINO2DEVINST(cookie, vino, scr, label)		;\
-	JMPL_DEVOP(cookie, scr, devop, cookie, label)
+	_JMPL_DEVOP(cookie, scr, devop, cookie, label)
 
 /*
  * Jmp to "devop" of device "handle" with "cookie"
  */
-#define	JMPL_DEVHANDLE2DEVOP(handle, devop, cookie, scr1, scr2, label)	\
+#define	JMPL_DEVHANDLE2DEVOP(handle, devop, cookie, scr1, scr2, faillabel) \
 	GUEST_STRUCT(cookie)					;\
-	DEVHANDLE2OPSVEC(cookie, handle, scr1, scr2, label)	;\
-	JMPL_DEVOP(cookie, scr1, devop, cookie, label)
+	_DEVHANDLE2OPSVEC(cookie, handle, scr1, scr2, faillabel) ;\
+	_JMPL_DEVOP(cookie, scr1, devop, cookie, faillabel)
 /* END CSTYLED */
 
 /*
@@ -200,27 +214,19 @@ extern "C" {
 #define	VINTR_INO_MASK	(NUM_VINTRS - 1)
 
 
-/*
- * The Niagara vector dispatch priorities
- */
-#define	VECINTR_CPUINERR 63
-#define	VECINTR_XCALL	62
-#define	VECINTR_SSIERR	61
-#define	VECINTR_DEV	31
-#define	VECINTR_FPGA	16
-#define	VECINTR_VDEV	15
-
 /* BEGIN CSTYLED */
 
-/* guest and vdevstate may be the same register */
+/* guest and vdevstate may NOT be the same register */
 #define	GUEST2VDEVSTATE(guest, vdevstate)		\
-	add	guest, GUEST_VDEV_STATE, vdevstate
+	set	GUEST_VDEV_STATE, vdevstate		; \
+	add	guest, vdevstate, vdevstate
+
 
 /* vino and mapreg may be the same register */
 #define	VINO2MAPREG(state, vino, mapreg)		\
-	and	vino, DEVINOMASK, mapreg		;\
-	sllx	mapreg, MAPREG_SHIFT, mapreg		;\
-	add	state, mapreg, mapreg			;\
+	and	vino, DEVINOMASK, mapreg		; \
+	sllx	mapreg, MAPREG_SHIFT, mapreg		; \
+	add	state, mapreg, mapreg			; \
 	add	mapreg, VDEV_STATE_MAPREG, mapreg
 
 /* END CSTYLED */
@@ -228,10 +234,15 @@ extern "C" {
 
 #ifndef _ASM
 
+
 struct devinst {
 	void		*cookie;
 	struct devopsvec *ops;
 };
+
+typedef struct devinst devinst_t;
+extern devinst_t devinstances[];
+
 
 /*
  * Virtual INO to Device Instance
@@ -240,11 +251,20 @@ struct devinst {
  *
  * It is used to go from vINO => device instance
  */
+
+typedef struct vino2inst vino2inst_t;
+
 struct vino2inst {
-	uint8_t	vino[NINOSPERDEV][NDEVIDS];
+	uint8_t	vino [NVINOS];
 };
 
-
+typedef struct vino_pcie vino_pcie_t;
+struct vino_pcie {
+	uint8_t vino [NPCIEDEVS][NINOSPERDEV];
+};
+extern const struct vino2inst config_vino2inst;
+extern const uint8_t config_dev2inst[NDEVIDS];
+extern const struct vino_pcie config_pcie_vinos;
 
 /*
  * Virtual Interrupt Mapping Register (vmapreg), one per interrupt
@@ -264,6 +284,9 @@ struct vino2inst {
  *
  * XXX have a flag or a pointer to 7 words to use in addition to data0
  */
+
+typedef struct vdev_mapreg vdev_mapreg_t;
+
 struct vdev_mapreg {
 	uint8_t		state;
 	uint8_t		valid;
@@ -274,12 +297,17 @@ struct vdev_mapreg {
 	uint64_t	data0;
 	uint64_t	devcookie;
 	uint64_t	getstate;
+	uint64_t	setstate;
+	uint64_t	_padding[3];
 };
 
 
 /*
  * vdev nexus state structure, one per guest
  */
+
+typedef struct vdev_state vdev_state_t;
+
 struct vdev_state {
 	uint64_t	handle;
 	struct vdev_mapreg mapreg[NUM_VINTRS];
@@ -287,6 +315,15 @@ struct vdev_state {
 	uint16_t	vinobase;	/* First Vino */
 };
 
+
+/*
+ * Definitions for vdev_intr_register & its C wrapper
+ */
+typedef int (*intr_getstate_f)(void *);
+typedef void (*intr_setstate_f)(void *, int);
+
+extern uint64_t c_vdev_intr_register(void *, int, void *,
+    intr_getstate_f, intr_setstate_f);
 
 #endif /* !_ASM */
 

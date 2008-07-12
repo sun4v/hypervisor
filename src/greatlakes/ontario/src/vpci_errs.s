@@ -42,13 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vpci_errs.s	1.18	06/04/26 SMI"
-
-	.file	"vpci_errs.s"
+	.ident	"@(#)vpci_errs.s	1.23	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -59,13 +57,15 @@
 #include <mmu.h>
 
 #include <guest.h>
+#include <strand.h>
 #include <offsets.h>
 #include <errs_common.h>
 #include <debug.h>
 #include <vpci_errs.h>
-#include <cpu.h>
 #include <util.h>
 #include <abort.h>
+#include <vdev_intr.h>
+#include <fire.h>
 
 
 #define	r_fire_cookie	%g1
@@ -922,6 +922,7 @@ pec_core_processing:
 	btst	r_tmp2, r_tmp1
 	.pushlocals
 	bz	%xcc, 1f
+	nop
 	LOG_TLU_OE_GROUP_REGS(r_fire_e_rpt, r_fire_leaf_address, r_tmp1,\
 								r_tmp2)
 	LOG_TLU_OE_INTR_STATUS_P(r_fire_e_rpt, r_fire_leaf_address,	\
@@ -957,6 +958,7 @@ pec_core_processing:
 	btst	r_tmp2, r_tmp1
 	.pushlocals
 	bz	%xcc, 1f
+	nop
 	LOG_TLU_OE_GROUP_REGS(r_fire_e_rpt, r_fire_leaf_address, r_tmp1,\
 								r_tmp2)
 	LOG_TLU_OE_INTR_STATUS_P(r_fire_e_rpt, r_fire_leaf_address,	\
@@ -1018,6 +1020,7 @@ pec_core_processing:
 	btst	r_tmp2, r_tmp1
 	.pushlocals
 	bz	%xcc, 1f
+	nop
 	LOG_TLU_OE_GROUP_REGS(r_fire_e_rpt, r_fire_leaf_address,	\
 							r_tmp1, r_tmp2)
 	LOG_TLU_OE_INTR_STATUS_S(r_fire_e_rpt, r_fire_leaf_address,	\
@@ -1051,6 +1054,7 @@ pec_core_processing:
 	btst	r_tmp2, r_tmp1
 	.pushlocals
 	bz	%xcc, 1f
+	nop
 	LOG_TLU_OE_GROUP_REGS(r_fire_e_rpt, r_fire_leaf_address, r_tmp1,\
 								 r_tmp2)
 	LOG_TLU_OE_INTR_STATUS_S(r_fire_e_rpt, r_fire_leaf_address, r_tmp1,\
@@ -1468,6 +1472,26 @@ csr_errors:
  *	7 of word 0 before we send it then call generate_guest_report
  */
 	ENTRY_NP(generate_guest_report_special)
+
+	/*
+	 * this error code is completely unintelligible ...
+	 * hopefully this register usage is OK but who can tell ???
+	 *
+	 * The PA has been inserted into the PCI error packet, now
+	 * translate to a RA
+	 */
+	ldx	[r_fire_e_rpt + PCIERPT_ERROR_PADDR], r_tmp2
+	RADDR_IS_IO_XCCNEG(r_tmp2, r_tmp1)
+	bneg    %xcc, .generate_guest_report_special_ra2pa_done	! do nothing
+        nop
+
+	GUEST_STRUCT(r_tmp1)
+	PA2RA_CONV(r_tmp1, r_tmp2, %g6, %g3, %g4)
+	! %g6	RADDR
+	stx	%g6, [r_fire_e_rpt + PCIERPT_ERROR_RADDR]
+
+.generate_guest_report_special_ra2pa_done:
+
 	/*
 	 * Is other leaf on?
 	 */
@@ -1491,8 +1515,9 @@ csr_errors:
 	ldx	[%g1], %g3
 	btog	0x40, %g3	! flip bit 7
 	stx	%g3, [%g1]
-	ba	insert_device_mondo_p
-	rd	%pc, %g7
+	STRAND_PUSH(%g1, r_tmp1, r_tmp2)
+	HVCALL(insert_device_mondo_p)
+	STRAND_POP(%g1, r_tmp1)
 	PRINT("HV:calling:generate_guest_report\r\n")
 
 	/*
@@ -1563,11 +1588,13 @@ csr_errors:
 	PRINT("\r\n")
 	PRINT("HV:calling:insert_device_mondo_p\r\n")
 #endif
-	ba	insert_device_mondo_p
-	rd	%pc, %g7
+	STRAND_PUSH(r_fire_e_rpt, r_tmp1, r_tmp2)
+	HVCALL(insert_device_mondo_p)
+	STRAND_POP(r_fire_e_rpt, r_tmp1)
+	mov	r_fire_e_rpt, %g1
 	PRINT("HV:calling:generate_fma_report\r\n")
 	/*
-	 * %g1 already points to the r_fire_e_rpt, no fixup, so don't use macro
+	 * %g1 r_fire_e_rpt
 	 */
 	ba,a	generate_fma_report
 	  .empty
@@ -1799,9 +1826,10 @@ csr_errors:
 	HVCALL(_fire_intr_gettarget)
 	!! %g3 phys cpuid for this ino
 
-	CPU_STRUCT(%g2)
-	ldub	[%g2 + CPU_PID], %g2
-	!! %g2 this cpu id
+	STRAND_STRUCT(%g2)		/* FIXME: this ok ? */
+	ldub	[%g2 + STRAND_ID], %g2
+
+	!! %g2 this cpu (strand) id
 	cmp	%g3, %g2
 	bne	%xcc, ._fire_err_intr_redistribution_done
 	nop
@@ -1841,7 +1869,7 @@ csr_errors:
 	CPU_POP(%g3, %g4, %g5, %g6)
 	CPU_POP(%g1, %g3, %g4, %g5)
 	ba	hvabort
-	mov	ABORT_INTERNAL_CORRUPT, %g1
+	rd	%pc, %g1
 
 	SET_SIZE(_fire_err_intr_redistribution)
 #endif /* CONFIG_FIRE */

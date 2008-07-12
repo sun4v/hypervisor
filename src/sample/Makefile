@@ -40,10 +40,10 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.15	06/04/26 SMI"
+# ident	"@(#)Makefile	1.19	07/06/07 SMI"
 #
 
 TOP = ..
@@ -52,9 +52,9 @@ SUBDIRS = lib
 
 include $(TOP)/Makefile.master
 
-INCFLAGS=-I$(COMMON_INC) -I/usr/include/v9 -I/usr/include
-CFLAGS=-v -xarch=v9 -xO3 ${INCFLAGS}
-ASFLAGS=-xarch=v9d -xregsym=no -P -D_ASM ${INCFLAGS}
+INCFLAGS=-I$(SUN_INC) -I$(COMMON_INC) -I/usr/include/v9 -I/usr/include
+CFLAGS=-v -xarch=v9 -xO3 ${INCFLAGS} -D_HV_SAMPLE
+ASFLAGS=-xarch=v9d -xregsym=no -P -D_ASM -D_HV_SAMPLE ${INCFLAGS}
 LDFLAGS=-dn -M mapfile -e start lib/libsa.a
 
 OBJS  = traptable.o srt0.o main.o hcalls.o traps.o  badtrap.o mmuinit.o mmu.o
@@ -79,5 +79,7 @@ clean ::
 clobber ::
 	$(RM) sample sample.bin
 
-lint:
-	lint -Xarch=v9 -I/usr/include/v9 -I/usr/include *.c *.s
+lint::
+	$(LINT) $(LINT_FLAGS) $(INCFLAGS) *.c
+
+	$(LINT) -Xarch=v9 -Xc99 -I/usr/include/v9 -I/usr/include -I. $(LINTERRS) *.s

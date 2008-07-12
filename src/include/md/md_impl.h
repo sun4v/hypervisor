@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _MD_MD_IMPL_H
 #define	_MD_MD_IMPL_H
 
-#pragma ident	"@(#)md_impl.h	1.4	05/03/31 SMI"
+#pragma ident	"@(#)md_impl.h	1.5	06/10/26 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,7 +68,7 @@ extern "C" {
 
 #define	MD_TRANSPORT_VERSION	0x10000 /* the version this library generates */
 
-#define	DT_ILLEGAL_IDX	((uint64_t)-1)
+#define	MD_ILLEGAL_NODEIDX	(-1)
 
 #define	DT_LIST_END	0x0
 #define	DT_NULL		' '
@@ -85,8 +85,16 @@ extern "C" {
 #define	MDET_PROP_VAL	DT_PROP_VAL
 #define	MDET_PROP_STR	DT_PROP_STR
 #define	MDET_PROP_DAT	DT_PROP_DAT
+#define	MDET_LIST_END	DT_LIST_END
 
 #ifndef _ASM
+
+typedef struct md_header md_hdr_t;
+typedef struct md_header md_header_t;
+	/* FIXME: dtnode_t to be renamed as md_element_t */
+typedef struct md_element dtnode_t;
+typedef struct md_element md_element_t;
+
 /*
  * Each MD has the following header to
  * provide information about each section of the MD.
@@ -101,9 +109,6 @@ struct md_header {
 	uint32_t	name_blk_sz;	/* size in bytes of the name block */
 	uint32_t	data_blk_sz;	/* size in bytes of the data block */
 };
-
-typedef struct md_header md_hdr_t;
-typedef struct md_header md_header_t;
 
 /*
  * This is the handle that represents the description
@@ -159,9 +164,13 @@ struct md_element {
 	} d;
 };
 
-	/* FIXME: dtnode_t to be renamed as md_element_t */
-typedef struct md_element dtnode_t;
-typedef struct md_element md_element_t;
+
+
+typedef struct {
+	md_header_t	hdr;
+	md_element_t	elem[];
+} bin_md_t;
+
 #define	MD_ELEMENT_SIZE	16
 
 #endif /* !_ASM */

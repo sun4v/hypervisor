@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vpci_msi.s	1.3	06/04/26 SMI"
+	.ident	"@(#)vpci_msi.s	1.5	07/07/17 SMI"
 
 	.file	"vpci_msi.s"
 
@@ -57,14 +57,10 @@
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
 #include <sparcv9/misc.h>
+#include <sun4v/vpci.h>
 #include <asi.h>
-#include <mmu.h>
 #include <hprivregs.h>
-#include <sun4v/traps.h>
-#include <sun4v/asi.h>
-#include <sun4v/mmu.h>
-#include <sun4v/queue.h>
-
+#include <vdev_intr.h>
 #include <offsets.h>
 #include <guest.h>
 #include <util.h>
@@ -193,6 +189,9 @@
  * ret0 status (%o0)
  */
 	ENTRY_NP(hcall_msiq_sethead)
+	btst	MSIEQ_REC_SIZE_MASK, %o2
+	bnz,pn	%xcc, herr_inval
+	nop
 	JMPL_DEVHANDLE2DEVOP(%o0, DEVOPSVEC_MSIQ_SETHEAD, %g1, %g2,
 	    %g3, herr_inval)
 	SET_SIZE(hcall_msiq_sethead)

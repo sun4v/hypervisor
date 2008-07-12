@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)reset.s	1.15	06/04/26 SMI"
+	.ident	"@(#)reset.s	1.18	07/05/03 SMI"
 
 	.file	"reset.s"
 
@@ -63,12 +63,19 @@
 #include <sun4v/traps.h>
 #include <asi.h>
 
-#define	MEMBASE	(4 * 1024 * 1024)
-#define	MEMSIZE (60 * 1024 * 1024)
+#if !FOR_ZEUS
+#define	MEMBASE		(4 * 1024 * 1024)
+#define	MEMSIZE		(60 * 1024 * 1024)
 #define	LOCK_ADDR	(MEMBASE + MEMSIZE - 16)
+#define	HVPD		0x1f12080000
+#define	HV		0xfff0010000
+#endif
+
+#ifdef DEBUG_LEGION
+#define	CPU_START_SET	0x3
+#endif
+
 #define	LOCK_SIZE	64
-#define	HVPD	0x1f12080000
-#define	HV	0xfff0010000
 
 /*
  * Niagara reset trap tables
@@ -135,6 +142,17 @@ ertraptable:
 	.global	rtraptable
 	.type	rtraptable, #function
 
+#if FOR_ZEUS
+	.align 8
+	.global	hv_info
+hv_info:
+	.xword 0		/* membase */
+	.xword 0		/* memsize */
+	.xword 0		/* hv addr */
+	.xword 0		/* hv md addr */
+	.size	hv_info, (.-hv_info)
+#endif
+
 	ENTRY_NP(start_reset)
 #ifdef CONFIG_SAS
 	! tick needs to be initialized, this is a hack for SAS
@@ -152,7 +170,7 @@ ertraptable:
 
 #ifdef CONFIG_SAS
 	! Enable L2 cache prior to enabling L1 caches
-	setx	L2_CTL_REG, %g2, %g1
+	setx	L2_CONTROL_REG, %g2, %g1
 	stx	%g0, [%g1 + 0x00]
 	stx	%g0, [%g1 + 0x40]
 	stx	%g0, [%g1 + 0x80]
@@ -172,43 +190,59 @@ ertraptable:
 
 	rd	%asr26, %g1
 	srlx	%g1, 8, %g1
-	and	%g1, 0x1f, %g1	! %g4 - current cpu id
-	inc	%g1
+	and	%g1, 0x1f, %g5	! %g5 - current cpu id
+	inc	%g5		! number from 1..32
 
-	setx	LOCK_ADDR, %g3, %g2
+#if FOR_ZEUS /* { */
+local1:
+	rd	%pc, %g6
+	add	%g6, hv_info - local1, %g6
+	ldx	[%g6], %g1	! Mem base
+	ldx	[%g6+8], %g2	! Mem size
+	ldx	[%g6+16], %g3	! Machine description location
+	ldx	[%g6+24], %g4	! Hypervisor ROM location
+#else	/* } { */
+	setx	MEMBASE, %g6, %g1 ! Mem base XXX
+	setx	MEMSIZE, %g6, %g2 ! Mem size XXX
+	setx	HVPD, %g6, %g3	! Partition Description
+	setx	HV, %g6, %g4
 
-	ldx	[%g2], %g3
-	brnz	%g3, .slave_entry
-	nop
+#endif	/* } */
 
-	casxa	[%g2]ASI_N, %g3, %g1
-	cmp	%g1, %g3
+	sub	%g2, LOCK_SIZE, %g2	! Hide lock location from HV
+	add	%g1, %g2, %g7		! Addr of lock location
+
+	ldx	[%g7], %g6
+	brnz	%g6, .slave_entry
+	  nop
+
+	casxa	[%g7]ASI_N, %g6, %g5
+	cmp	%g6, %g5
 	be,pt	%xcc, .master_entry
-	nop
+	  nop
 
-.slave_entry:
-1:	ldx	[%g2], %g3
-	cmp	%g3, -1
-	bne,pn	%xcc, 1b	! wait for copy to complete
-	nop
 
 	/*
 	 * Slave
 	 */
-	setx	MEMBASE, %g4, %g1 ! Mem base XXX
-	setx	MEMSIZE, %g4, %g2 ! Mem size XXX
-	sub	%g2, LOCK_SIZE, %g2 ! hide lock from hypervisor
-	setx	HVPD, %g4, %g3	! Partition Description
-	setx	HV, %g5, %g4
-	add	%g4, 0x30, %g4
+
+.slave_entry:
+1:	ldx	[%g7], %g5
+	cmp	%g5, -1
+	bne,pn	%xcc, 1b	! wait for copy to complete
+	  nop
+
+	add	%g4, 0x30, %g4	! Slave entry point
 	jmp	%g4
-	nop
+	  nop
+
 
 	/*
 	 * Master
 	 */
+
 .master_entry:
-	/* IDLE all of the other strands */
+		/* IDLE all of the other strands */
 	rd	%asr26, %g6
 	srlx	%g6, 8, %g6
 	and	%g6, 0x1f, %g6	! %g6 - current strand id
@@ -229,23 +263,50 @@ ertraptable:
 	bgeu,pt	%xcc, 1b
 	nop
 
-	/* Allow them to continue when they wake up */
-	setx	LOCK_ADDR, %g7, %g1
-	mov	-1, %g2
-	stx	%g2, [%g1]
+		/* Allow them to continue when they wake up */
+	mov	-1, %g1
+	stx	%g1, [%g7]
 
-	setx	MEMBASE, %g4, %g1 ! Mem base XXX
-	setx	MEMSIZE, %g4, %g2 ! Mem size XXX
-	setx	HVPD, %g4, %g3	! Partition Description
-	setx	HV, %g5, %g4
-	add	%g4, 0x20, %g4
-	jmp	%g4
+		/*
+		 * re-init parameters
+		 */
+
+#if FOR_ZEUS /* { */
+local2:
+	rd	%pc, %g6
+	add	%g6, hv_info - local2, %g6
+	ldx	[%g6], %g1	! Mem base
+	ldx	[%g6+8], %g2	! Mem size
+	ldx	[%g6+16], %g3	! Machine description location
+	ldx	[%g6+24], %g6	! Hypervisor ROM location
+#else	/* } { */
+	setx	MEMBASE, %g6, %g1 ! Mem base XXX
+	setx	MEMSIZE, %g6, %g2 ! Mem size XXX
+	setx	HVPD, %g6, %g3	! Partition Description
+	setx	HV, %g4, %g6
+#endif	/* } */
+
+	! %g4 = cpustartset
+	mov     -1, %g4
+	srl     %g4, 0, %g4     ! %g4 now contains 0xffff.ffff
+
+	! %g5 = phys mem - only used for scrubbing on real HW so we can use 0x0
+	mov     %g0, %g5
+
+        sub     %g2, LOCK_SIZE, %g2     ! Hide lock
+
+	add	%g6, 0x20, %g6
+	jmp	%g6
 	nop
 	SET_SIZE(start_reset)
+
+
 
 	ENTRY_NP(rtrap)
 	ta	0x1
 	SET_SIZE(rtrap)
+
+
 
 	! %g1 contains trap# to revector to 
 	ENTRY_NP(revec)

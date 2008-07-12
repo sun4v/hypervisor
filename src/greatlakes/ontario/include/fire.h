@@ -42,23 +42,24 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#ifndef _NIAGARA_FIRE_H
-#define	_NIAGARA_FIRE_H
+#ifndef _ONTARIO_FIRE_H
+#define	_ONTARIO_FIRE_H
 
-#pragma ident	"@(#)fire.h	1.12	06/07/13 SMI"
-
+#pragma ident	"@(#)fire.h	1.19	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <support.h>
 #include <fire/fire_regs.h>
 #include <fire/fire.h>
 #include <sun4v/vpci.h>
+#include <vpci_errs_defs.h>
 #include <jbi_regs.h>
 
 #define	NFIRES		1
@@ -187,6 +188,53 @@ extern "C" {
 #define	RWUC_S	(RWUC_P << 32)
 
 /*
+ * These IO config space offsets are expected to remain fixed and so
+ * we just hard code them. These are used for PCI bus reset of a logical
+ * domain which is being reset (and controls one or more of the IO leafs).
+ */
+#define	UPST_CFG_BASE		0x200000	/* upstream port cfg base */
+
+#define	DNST_CFG_PORT_BASE(_x)  (0x300000 + ((_x)<<15))
+#define	DNST_CFG_BASE		0x308000	/* downstream port 1 cfg base */
+
+#define	PE2X_CFG_BASE		0x400000	/* PCIE->PCIX bridge cfg base */
+#define	SOUTHBRIDGE_CFG_BASE	0x510000
+#define	CFG_SECONDARY_RESET	0x3c		/* used for secondary reset */
+#define	CFG_CMD_REG		0x4		/* command register */
+#define	CFG_CLASS_CODE		0x8		/* class code */
+#define	CFG_BAR0		0x10		/* BAR0 */
+#define	CFG_BAR1		0x14		/* BAR1 */
+#define	CFG_PS_BUS		0x18		/* primary/secondary bus#s */
+#define	CFG_IOBASE_LIM		0x1c		/* I/O base and Limit */
+#define	CFG_MEMBASE		0x20		/* memory base */
+#define	CFG_MEMLIM		0x22		/* memory limit */
+#define	CFG_PFBASE		0x24		/* prefetchable base */
+#define	CFG_PFLIM		0x26		/* prefetchable limit */
+#define	CFG_PF_UBASE		0x28		/* prefetchable upper base */
+#define	CFG_PF_ULIM		0x2c		/* prefetchable upper limit */
+#define	CFG_IO_UBASE		0x30		/* IO upper base */
+#define	CFG_IO_ULIM		0x32		/* IO upper limit */
+
+#define	CFG_STAT_CTRL		0x70		/* device status and control */
+#define	CFG_LINK_TRAIN		0x78		/* link training status */
+#define	CFG_LINK_TRAIN_MASK	(1LL<<27)	/* link training status */
+#define	CFG_LINK_TRAIN_ERR_MASK	(1LL<<26)	/* link training status */
+#define	CFG_VC0_STATUS		0x160		/* Virtual channel 0 status */
+#define	CFG_VC0_STATUS_MASK	(1LL<<17)	/* link train up */
+
+#define	UPST_CFG_PS_BUS_VAL	0x60302
+#define	DNST_CFG_PS_BUS_VAL	0x60403
+#define	PE2X_CFG_PS_BUS_VAL	0x60504
+#define	SOUTHBRIDGE_RESET_VAL	0xfe
+#define	SOUTHBRIDGE_CFG_RESET	0x44		/* Southbridge reset (cfg) */
+#define	SOUTHBRIDGE_IO_RESET	0x64		/* Southbridge reset (io) */
+
+#define	PLX_8532_DEV_VEND_ID	0x853210b5
+#define	INTEL_BRG_DEV_VEND_ID	0x3408086
+#define	ALI_SB_DEV_VEND_ID	0x153310b9
+#define	BRIDGE_CLASS_CODE	0x60400
+
+/*
  * Disable reporting of Fire R/W Unsuccessful Completion (UC) errors
  * during PCI config space accesses, PCI peek and PCI poke
  */
@@ -259,6 +307,43 @@ extern "C" {
 0:	add	fire, FIRE_COOKIE_ERR_LOCK, scr3		;\
 	SPINLOCK_EXIT(scr3)					;\
 	.poplocals
+
+
+/*
+ * This macro flushes all IOMMU entries from a given Fire leaf
+ *
+ * Inputs:
+ *
+ *    fire - (preserved) pointer to FIRE_COOKIE
+ *
+ */
+#define	FIRE_IOMMU_FLUSH(fire, scr1, scr2, scr3, scr4)		\
+	.pushlocals						;\
+	ldx	[fire + FIRE_COOKIE_IOTSB], scr1		;\
+	setx	IOTSB_INDEX_MAX, scr4, scr3			;\
+	/*							;\
+	 * fire - fire cookie pointer				;\
+	 * scr1 = IOTSB offset					;\
+	 * scr3 = #ttes to unmap				;\
+	 */							;\
+	ldx	[fire + FIRE_COOKIE_MMU], scr4			;\
+0:								;\
+	ldx	[scr1], scr2					;\
+	/* Clear V bit */					;\
+	sllx	scr2, 1, scr2					;\
+	srlx	scr2, 1, scr2					;\
+	/* Clear Attributes */					;\
+	srlx	scr2, FIRE_PAGESIZE_8K_SHIFT, scr2		;\
+	sllx	scr2, FIRE_PAGESIZE_8K_SHIFT, scr2		;\
+	stx	scr2, [scr1]					;\
+	/* IOMMU Flush */					;\
+	stx	scr1, [scr4 + 0x100]				;\
+	add	scr1, IOTTE_SIZE, scr1				;\
+	sub	scr3, 1, scr3					;\
+	brgz,pt	scr3, 0b					;\
+	  nop							;\
+	.poplocals
+
 /* END CSTYLED */
 
 #ifndef _ASM
@@ -293,7 +378,9 @@ extern void fire_msi_intr_gettarget(void);
 extern void fire_msi_intr_settarget(void);
 
 extern void fire_iommu_map(void);
+extern void fire_iommu_map_v2(void);
 extern void fire_iommu_getmap(void);
+extern void fire_iommu_getmap_v2(void);
 extern void fire_iommu_unmap(void);
 extern void fire_iommu_getbypass(void);
 extern void fire_config_get(void);
@@ -352,6 +439,9 @@ struct fire_cookie {
 	uint64_t	pcie;
 	uint64_t	cfg;	/* PCI CFG PA */
 
+	bool_t		needs_warm_reset; /* false if fresh from poweron */
+	uint64_t	live_port;	/* Bit mask for  live PLX ports */
+
 	uint64_t	perfregs;
 
 	uint64_t	eqctlset;
@@ -370,6 +460,10 @@ struct fire_cookie {
 	uint64_t	intmap_other;
 	uint64_t	*virtual_intmap;
 
+#ifdef FIRE_ERRATUM_20_18
+	uint64_t	extracfgrdaddrpa;
+#endif
+
 	uint64_t	err_lock;
 	uint64_t	err_lock_counter;
 	uint64_t	tlu_oe_status;
@@ -384,7 +478,30 @@ struct fire_cookie {
 
 	struct pci_erpt	jbc_erpt; /* Fire error buffer */
 	struct pci_erpt	pcie_erpt; /* Fire error buffer */
+	bool_t		blacklist;
+	uint64_t	guest_pci_va_limit;
 };
+
+typedef struct fire_cookie fire_dev_t;
+
+extern const fire_dev_t fire_dev[];
+
+extern bool_t	is_fire_port_link_up(fire_dev_t *);
+extern bool_t	fire_link_up(fire_dev_t *);
+extern bool_t	fire_link_down(fire_dev_t *);
+extern void	fire_config_bypass(fire_dev_t *, bool_t);
+
+extern bool_t pci_config_get(fire_dev_t *, uint64_t offset, int size,
+	uint64_t *valp);
+extern bool_t pci_config_put(fire_dev_t *, uint64_t offset, int size,
+	uint64_t val);
+extern bool_t pci_io_peek(fire_dev_t *, uint64_t offset, int size,
+	uint64_t *valp);
+extern bool_t pci_io_poke(fire_dev_t *, uint64_t offset, int size,
+	uint64_t val, uint64_t cfg_offset);
+
+extern bool_t pcie_bus_reset(int busnum);
+extern void init_pcie_buses(void);
 
 #endif /* !_ASM */
 
@@ -392,4 +509,4 @@ struct fire_cookie {
 }
 #endif
 
-#endif /* _NIAGARA_FIRE_H */
+#endif /* _ONTARIO_FIRE_H */

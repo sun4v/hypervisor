@@ -40,10 +40,10 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
+# ident	"@(#)Makefile	1.4	07/05/03 SMI"
 #
 
 VARIANT = debug
@@ -54,22 +54,25 @@ include ../Makefile.platform
 
 OPTIONS = $(PLAT_OPTIONS)
 OPTIONS += -DDEBUG
+OPTIONS += -DDEBUG_VINTR
 OPTIONS += -USTRICT_API
 OPTIONS += -DNIAGARA_BRINGUP
 OPTIONS += -UCONFIG_DISK	# Simulated disk support
+OPTIONS += -DCONFIG_PCIE	# Initialize and configure PCIE
 OPTIONS += -DCONFIG_FIRE	# Initialize and configure Fire
 OPTIONS += -DCONFIG_FIRE_EBUS	# Initialize and configure Fire EBus
 OPTIONS += -UCONFIG_IOBYPASS	# Guest I/O bypass access
 OPTIONS += -DCONFIG_SVC
 OPTIONS += -DCONFIG_VBSC_SVC	# VBSC comm channel
-OPTIONS += -DCONFIG_CN_SVC	# Consoles using svc channels
 OPTIONS += -DCONFIG_FPGA	# hardware fpga present
 OPTIONS += -UCONFIG_STATICTOD	# Time does not move - pending FPGA support
 OPTIONS += -UDEBUG_LEGION	# Legion-specific debugging aids
 OPTIONS += -UCONFIG_LEGIONBCOPY # Legion has physical bcopy magic trap
 OPTIONS += -UCONFIG_SAS	# Compile without copies for PPG simulation
 OPTIONS += -DCONFIG_HVUART
+OPTIONS += -UCONFIG_CN_UART	# UART console capability for a guest
 OPTIONS += -DCONFIG_VERSION_TEST
+OPTIONS += -DCONFIG_CRYPTO       # Crypto support
 
 ########################################
 

@@ -42,24 +42,38 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SUN4V_VPCI_H
 #define	_SUN4V_VPCI_H
 
-#pragma ident	"@(#)vpci.h	1.4	05/06/01 SMI"
+#pragma ident	"@(#)vpci.h	1.6	07/07/17 SMI"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define	HVIO_TTE_R		0x001
-#define	HVIO_TTE_W		0x002
-#define	HVIO_TTE_S		0x004
-#define	HVIO_TTE_ATTR_MASK	0x007
+#define	HVIO_TTE_R		0x00000001
+#define	HVIO_TTE_W		0x00000002
+#define	HVIO_TTE_ATTR_MASK	0x00000003
+
+#define	HVIO_TTE_PP		0x00000030
+#define	HVIO_TTE_L		0x00000004
+#define	HVIO_TTE_BDF		0xffff0000
+#define	HVIO_TTE_EXT_MASK	0xffff0034
+
+#define	HVIO_TTE_PP_NONE	0x00000000
+#define	HVIO_TTE_PP_2MSBS	0x00000020
+#define	HVIO_TTE_PP_MSB		0x00000010
+#define	HVIO_TTE_PP_ALL		0x00000030
+
+#define	HVIO_TTE_PP_SHIFT	4
+#define	HVIO_TTE_BDF_SHIFT	16
+
+#define	HVIO_TTE_ATTR_MASK_V2	(HVIO_TTE_ATTR_MASK | HVIO_TTE_EXT_MASK)
 
 #define	HVIO_IO_R		0x001
 #define	HVIO_IO_W		0x002
@@ -83,6 +97,10 @@ extern "C" {
 #define	MSIQTYPE_64		1
 #define	MSIQTYPE_MAX_VALUE	MSIQTYPE_64
 
+#define	MSIEQ_REC_SHIFT		6
+#define	MSIEQ_REC_SIZE		(xULL(1) << MSIEQ_REC_SHIFT)
+#define	MSIEQ_REC_SIZE_MASK	(MSIEQ_REC_SIZE - 1)
+
 #define	INTR_DISABLED		0
 #define	INTR_ENABLED		1
 #define	INTR_ENABLED_MAX_VALUE	INTR_ENABLED
@@ -99,6 +117,8 @@ extern "C" {
 #define	VPCI_MSIEQ_MSG_RT_CODE_SHIFT 16
 #define	VPCI_MSG_CODE_SHIFT	0
 
+#define	PCIE_CFG_OFFSET_MASK	((1 << 12) - 1)
+#define	PCIE_BDF_MASK		(((1 << 24) - 1) ^ ((1 << 8) - 1))
 
 #define	IOMMU_MAP_MAX		64 /* max # of pages mapped  */
 

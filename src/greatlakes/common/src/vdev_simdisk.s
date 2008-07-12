@@ -42,15 +42,13 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vdev_simdisk.s	1.2	06/04/26 SMI"
+	.ident	"@(#)vdev_simdisk.s	1.4	07/05/03 SMI"
 
-	.file	"vdev_simdisk.s"
-
-#ifdef CONFIG_DISK /* { */
+#ifdef CONFIG_DISK
 
 #include <sys/asm_linkage.h>
 #include <hypervisor.h>
@@ -74,13 +72,17 @@
  * ret1 size (%o1)
  */
 	ENTRY_NP(hcall_disk_read)
+#ifndef SIMULATION
+	ba	herr_inval
+	nop
+#endif
 	GUEST_STRUCT(%g1)
-	RANGE_CHECK(%g1, %o1, %o2, herr_noraddr, %g2)
-	REAL_OFFSET(%g1, %o1, %g2, %g3)
+	RA2PA_RANGE_CONV_UNK_SIZE(%g1, %o1, %o2, herr_noraddr, %g3, %g2)
+	! %g2	paddr
 
 	set	GUEST_DISK, %g3
 	add	%g1, %g3, %g1
-	!! %g1 = diskp
+	! %g1 = diskp
 
 	ldx	[%g1 + DISK_SIZE], %g3
 	brnz,pt	%g3, 1f
@@ -125,13 +127,17 @@
  * ret1 size (%o1)
  */
 	ENTRY_NP(hcall_disk_write)
+#ifndef SIMULATION
+	ba	herr_inval
+	nop
+#endif
 	GUEST_STRUCT(%g1)
-	RANGE_CHECK(%g1, %o1, %o2, herr_noraddr, %g2)
-	REAL_OFFSET(%g1, %o1, %g3, %g2)
+	RA2PA_RANGE_CONV_UNK_SIZE(%g1, %o1, %o2, herr_noraddr, %g2, %g3)
+	! %g3	paddr
 
 	set	GUEST_DISK, %g2
 	add	%g1, %g2, %g1
-	!! %g1 = diskp
+	! %g1 = diskp
 
 	ldx	[%g1 + DISK_SIZE], %g2
 	brnz,pt	%g2, 1f
@@ -165,5 +171,4 @@
 	HCALL_RET(EOK)
 	SET_SIZE(hcall_disk_write)
 
-#endif /* CONFIG_DISK } */
-
+#endif /* CONFIG_DISK */

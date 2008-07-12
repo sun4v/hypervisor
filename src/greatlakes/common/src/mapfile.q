@@ -40,9 +40,9 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# ident	"@(#)mapfile.q	1.6	04/07/16 SMI"
+# ident	"@(#)mapfile.q	1.7	06/10/26 SMI"
 #
-# Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
 
@@ -50,17 +50,18 @@ note = NOTE;
 note : $NOTE ;
 note : .comment ;
 note : .stab.index ;
-note : .debug_info ;
-note : .debug_line ;
-note : .debug_abbrev ;
 
+# For the 1st four sections enforce a section order
+# with the | directive to ensure that we can determine the
+# size of the GOT by looking for the _start_data symbol
 rom = LOAD ?RX V0xfff0000000;
-rom : .text ;
+rom | .text ;
+rom | .rodata  ;
+rom | .got ;
+rom | .data  ;
+rom : .data1  ;
 rom : $PROGBITS ;
 rom : $NOBITS ;
-rom : .rodata  ;
-rom : .data  ;
-rom : .data1  ;
 rom : .bss  ;
 
 bss =;

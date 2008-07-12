@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)traps.s	1.9	05/04/26 SMI"
+	.ident	"@(#)traps.s	1.10	07/04/22 SMI"
 
 	.file	"trap.s"
 
@@ -65,8 +65,8 @@ watchdog(void)
 #else
 	ENTRY(watchdog)
 	mov	1, %o0
-	mov	MACH_EXIT, %o5
-	ta	FAST_TRAP
+	mov	API_EXIT, %o5
+	ta	CORE_TRAP
 	illtrap
 	SET_SIZE(watchdog)
 #endif /* lint */
@@ -78,9 +78,9 @@ xir(void)
 }
 #else
 	ENTRY(xir)
-	mov	1, %o0
-	mov	MACH_EXIT, %o5
-	ta	FAST_TRAP
+	mov	2, %o0
+	mov	API_EXIT, %o5
+	ta	CORE_TRAP
 	illtrap
 	SET_SIZE(xir)
 #endif /* lint */
@@ -206,6 +206,10 @@ por(void)
 	wrpr	%g0, 0, %wstate
 	wr	%g0, %y
 	wrpr	%g0, 0xf, %pil
+
+	! Establish API version
+	call	api_version_init
+	nop
 
 	! Figure out RA base
 	setn	traptable0, %g2, %g1

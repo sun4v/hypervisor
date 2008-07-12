@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#ifndef _NIAGARA_VPCI_ERRS_DEFS_H
-#define	_NIAGARA_VPCI_ERRS_DEFS_H
+#ifndef _VPCI_ERRS_DEFS_H
+#define	_VPCI_ERRS_DEFS_H
 
-#pragma ident	"@(#)vpci_errs_defs.h	1.4	06/02/09 SMI"
+#pragma ident	"@(#)vpci_errs_defs.h	1.5	07/04/18 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -185,4 +185,4 @@ struct pci_erpt {
 }
 #endif
 
-#endif /* _NIAGARA_VPCI_ERRS_DEFS_H */
+#endif /* _VPCI_ERRS_DEFS_H */

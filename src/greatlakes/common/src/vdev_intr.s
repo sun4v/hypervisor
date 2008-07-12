@@ -42,37 +42,27 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vdev_intr.s	1.8	06/04/26 SMI"
-
-	.file	"vdev_intr.s"
+	.ident	"@(#)vdev_intr.s	1.13	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
 #include <hypervisor.h>
 #include <sparcv9/misc.h>
 #include <asi.h>
-#include <mmu.h>
 #include <hprivregs.h>
-#include <sun4v/traps.h>
 #include <sun4v/asi.h>
-#include <sun4v/mmu.h>
-#include <sun4v/queue.h>
-
-#include <guest.h>
+#include <sun4v/intr.h>
+#include <abort.h>
+#include <strand.h>
 #include <offsets.h>
 #include <util.h>
 #include <debug.h>
+#include <vdev_intr.h>
 
-/*
- * XXX NOTES
- *
- * Add a bit to state that the cpu fields have been set?  Fail setvalid
- * if the bit isn't set?
- */
 
 #ifndef MAPREG_SHIFT
 #error "vdev_mapreg not properly sized (power of two)"
@@ -86,7 +76,6 @@
  * %g1 - guest
  * --
  */
-/* XXX call from setup_guest */
 	ENTRY(vdev_init)
 	!! %g1 = guestp
 	/* XXX? get ign from CONFIG + CONFIG_VINTR, save */
@@ -94,8 +83,10 @@
 	!! %g2 = vdevstatep
 
 	/* XXX initialize vinobase */
+	setx	VDEV_STATE_VINOBASE, %g4, %g3
+	add	%g2, %g3, %g2
 	mov	0x100, %g3
-	sth	%g3, [%g2 + VDEV_STATE_VINOBASE]
+	sth	%g3, [%g2]
 
 	jmp	%g7 + 4
 	nop
@@ -131,8 +122,8 @@
  * ret1 intr valid state (%o1)
  */
 	ENTRY(vdev_intr_getvalid)
-	GUEST_STRUCT(%g1)
-	add	%g1, GUEST_VDEV_STATE, %g1
+	GUEST_STRUCT(%g2)
+	GUEST2VDEVSTATE(%g2, %g1)
 	!! %g1 = &guestp->vdev_state
 	VINO2MAPREG(%g1, %o0, %g2)
 	!! %g2 = vdev_mapregp
@@ -150,8 +141,8 @@
  * ret0 status (%o0)
  */
 	ENTRY(vdev_intr_setvalid)
-	GUEST_STRUCT(%g1)
-	add	%g1, GUEST_VDEV_STATE, %g1
+	GUEST_STRUCT(%g2)
+	GUEST2VDEVSTATE(%g2, %g1)
 	!! %g1 = &guestp->vdev_state
 	VINO2MAPREG(%g1, %o0, %g2)
 	!! %g2 = vdev_mapregp
@@ -160,6 +151,14 @@
 	 * XXX Initialize data0 here for now
 	 */
 	stx	%o0, [%g2 + MAPREG_DATA0]
+
+! mov	%g7, %g3
+! PRINT("vdev_intr_setvalid mapreg 0x")
+! PRINTX(%g2)
+! PRINT(" INO 0x")
+! PRINTX(%o0)
+! PRINT("\r\n")
+! mov	%g3, %g7
 
 	and	%o0, DEVINOMASK, %g3
 	stb	%g3, [%g2 + MAPREG_INO]
@@ -217,13 +216,14 @@
 	!! %g1 = guestp
 	VCPUID2CPUP(%g1, %o1, %g3, herr_nocpu, %g4)
 	!! %g3 = target cpup
-	ldub	[%g3 + CPU_PID], %g3
+	VCPU2STRAND_STRUCT(%g3, %g3)
+	ldub	[%g3 + STRAND_ID], %g3
 	!! %o0 = vino
 	!! %o1 = target vcpuid
 	!! %g3 = target pcpuid
-	add	%g1, GUEST_VDEV_STATE, %g1
-	!! %g1 = &guestp->vdev_state
-	VINO2MAPREG(%g1, %o0, %g2)
+	GUEST2VDEVSTATE(%g1, %g4)
+	!! %g4 = &guestp->vdev_state
+	VINO2MAPREG(%g4, %o0, %g2)
 	!! %g2 = vdev_mapregp
 	sth	%g3, [%g2 + MAPREG_PCPU]
 	sth	%o1, [%g2 + MAPREG_VCPU]
@@ -241,8 +241,8 @@
  * ret1 target vcpu (%o1)
  */
 	ENTRY(vdev_intr_gettarget)
-	GUEST_STRUCT(%g1)
-	add	%g1, GUEST_VDEV_STATE, %g1
+	GUEST_STRUCT(%g2)
+	GUEST2VDEVSTATE(%g2, %g1)
 	!! %g1 = &guestp->vdev_state
 	VINO2MAPREG(%g1, %o0, %g2)
 	!! %g2 = vdev_mapregp
@@ -261,8 +261,8 @@
  * ret1 intr state (%o1)
  */
 	ENTRY(vdev_intr_getstate)
-	GUEST_STRUCT(%g1)
-	add	%g1, GUEST_VDEV_STATE, %g1
+	GUEST_STRUCT(%g2)
+	GUEST2VDEVSTATE(%g2, %g1)
 	!! %g1 = &guestp->vdev_state
 	VINO2MAPREG(%g1, %o0, %g6)
 	!! %g6 = mapreg
@@ -291,20 +291,29 @@
  * ret0 status (%o0)
  */
 	ENTRY(vdev_intr_setstate)
-	GUEST_STRUCT(%g1)
-	add	%g1, GUEST_VDEV_STATE, %g1
+	GUEST_STRUCT(%g2)
+	GUEST2VDEVSTATE(%g2,%g1)
 	!! %g1 = &guestp->vdev_state
 	VINO2MAPREG(%g1, %o0, %g6)
 	!! %g6 = vdev_mapregp
 
 	/* Store new state, only check current state if the new state is IDLE */
-	cmp	%o1, INTR_IDLE
-	bne,pn	%xcc, 1f
 	stb	%o1, [%g6 + MAPREG_STATE]
 
+	ldx	[%g6 + MAPREG_SETSTATE], %g3
+	brz,pn	%g3, 1f
+	mov	%o1, %g2
+	ldx	[%g6 + MAPREG_DEVCOOKIE], %g1
+	mov	%g6, %o5	! XXX
+	jmp	%g3		! setstate_callback(cookie,new-state)
+	  rd	%pc, %g7
+	mov	%o5, %g6
+1:
+	cmp	%o1, INTR_IDLE
+	bne,pn	%xcc, 2f
 	/* Call getstate callback */
 	ldx	[%g6 + MAPREG_GETSTATE], %g2
-	brz,pn	%g2, 1f
+	brz,pn	%g2, 2f
 	ldx	[%g6 + MAPREG_DEVCOOKIE], %g1
 	mov	%g6, %o5	! XXX
 	jmp	%g2		! getstate_callback(cookie)
@@ -314,7 +323,7 @@
 	mov	%o5, %g1
 	brnz,pn	%g2, vdev_intr_generate ! vdev_intr_generate(mapreg, state)
 	  rd	%pc, %g7
-1:
+2:
 	HCALL_RET(EOK)
 	SET_SIZE(vdev_intr_setstate)
 
@@ -329,49 +338,74 @@
  * %i0 - global config
  * %g1 - guest
  * %g2 - ino
- * %g3 - driver's getstate() callback address
- * %g4 - driver's cookie (pointer to state structure, etc)
+ * %g3 - driver's cookie (pointer to state structure, etc)
+ * %g4 - driver's getstate() callback address
+ * %g5 - driver's setstate() callback address
  * %g7 - return address
  * --
  * %g1 - virtual interrupt handle (used by vdev_intr_generate)
  */
 	ENTRY(vdev_intr_register)
-	GUEST2VDEVSTATE(%g1, %g1)
+	mov	%g1, %g6
+	GUEST2VDEVSTATE(%g6, %g1)
 	!! %g1 = vdev state pointer for the appropriate guest
 	cmp	%g2, NINOSPERDEV
-	blu,pt	%xcc, 0f
-	nop
-#ifdef DEBUG
-	PRINT("ERROR: vdev_intr_register: ino out of range: ")
-	PRINTX(%g2)
-	PRINT("\r\n")
-	ba,pt	%xcc, 1f
-	mov	0, %g1	
-#endif
-0:	VINO2MAPREG(%g1, %g2, %g5)
-	!! %g5 = vdev_mapregp
-#ifdef DEBUG
-	ldx	[%g5 + MAPREG_GETSTATE], %g6
-	brz,pt	%g6, 0f
-	mov	%g7, %g6
-	PRINT("WARNING:	vdev_intr_register: duplicate use of INO: ")
-	PRINTX(%g2)
-	PRINT("\r\n")
-	mov	%g6, %g7
-0:	
-#endif
-	stx	%g3, [%g5 + MAPREG_GETSTATE]
-	stx	%g4, [%g5 + MAPREG_DEVCOOKIE]
+	bgeu,a,pn %xcc, 1f
+	  mov	0, %g1
+	VINO2MAPREG(%g1, %g2, %g6)
+	!! %g6 = vdev_mapregp
 
-	lduh	[%g1 + VDEV_STATE_VINOBASE], %g3
-	add	%g3, %g2, %g3
-	!! %g3 vino
-	stx	%g3, [%g5 + MAPREG_DATA0]
-	mov	%g5, %g1	! return vdev_mapregp
+	stx	%g3, [%g6 + MAPREG_DEVCOOKIE]
+	stx	%g4, [%g6 + MAPREG_GETSTATE]
+	stx	%g5, [%g6 + MAPREG_SETSTATE]
+
+	setx	VDEV_STATE_VINOBASE, %g4, %g5
+	lduh	[%g1 + %g5], %g5
+	add	%g5, %g2, %g5
+	!! %g5 vino
+	stx	%g5, [%g6 + MAPREG_DATA0]
+	mov	%g6, %g1	! return vdev_mapregp
 
 1:	jmp	%g7 + 4
 	nop
 	SET_SIZE(vdev_intr_register)
+
+	/*
+	 * Wrapper around vdev_intr_register, so it can be called from C
+	 * SPARC ABI requries only that g2,g3,g4 are preserved across
+	 * function calls.
+	 * %o0 = guestp
+	 * %o1 = ino
+	 * %o2 = &config.maus[mau-id]
+	 * %o3 = mau_intr_getstate
+	 * %o4 = mau_intr_setstate
+	 *
+	 * Returns cookie in %o0
+	 *
+	 * void c_vdev_intr_register(strand_t targetp, hvm_t *msgp)
+	 */
+
+	ENTRY(c_vdev_intr_register)
+
+	STRAND_PUSH(%g2, %g6, %g7)
+	STRAND_PUSH(%g3, %g6, %g7)
+	STRAND_PUSH(%g4, %g6, %g7)
+
+	mov	%o0, %g1
+	mov	%o1, %g2
+	mov	%o2, %g3
+	mov	%o3, %g4
+	mov	%o4, %g5
+	HVCALL(vdev_intr_register)
+	mov	%g1, %o0
+
+	STRAND_POP(%g4, %g6)
+	STRAND_POP(%g3, %g6)
+	STRAND_POP(%g2, %g6)
+	
+	retl
+	  nop
+	SET_SIZE(c_vdev_intr_register)
 
 
 /*
@@ -383,6 +417,9 @@
  *
  * Clobbers:
  */
+
+	/* FIXME: need to handle case of more than one vcpu per strand */
+
 	ENTRY(vdev_intr_generate)
 	ldub	[%g1 + MAPREG_VALID], %g2
 	ldub	[%g1 + MAPREG_STATE], %g3
@@ -399,30 +436,23 @@
 	cmp	%g3, INTR_IDLE
 	bne,pn	%xcc, 1f
 	.empty	
-	CPU_STRUCT(%g3)
-	!! %g3 = cpup
-	ldub	[%g1 + MAPREG_INO], %g5
-	!! %g5 = ino
-	ldub	[%g3 + CPU_PID], %g4		! current cpu pid
-	cmp	%g4, %g2
-	bne,pn	%xcc, 2f
-	nop
 
-	/* Local */
-	stx	%g5, [%g3 + CPU_VINTR]
-	ba,pt	%xcc, vdev_mondo ! returns to caller
-	mov	%g3, %g1
-
-2:	/* Remote */
 	!! %g1 = vmapreg
 	!! %g2 = target pcpuid
-	PID2CPUP(%g2, %g3, %g4)
+	PID2VCPUP(%g2, %g3, %g4, %g5)
 	!! %g3 target cpup
-	stx	%g5, [%g3 + CPU_VINTR]
+	/*
+	 * Update interrupt state to INTR_DELIVERED
+	 */
+	mov	INTR_DELIVERED, %g2
+	stb	%g2, [%g1 + MAPREG_STATE]
 
-	sllx	%g2, 8, %g1
-	or	%g1, VECINTR_VDEV, %g1
-	stxa	%g1, [%g0]ASI_INTR_UDB_W	! send xcall
+	mov	%g1, %g4
+	mov	%g3, %g1
+	ldx	[%g4 + MAPREG_DATA0], %g3
+
+	ba	send_dev_mondo	/* Returns to caller */
+	mov	1 , %g2
 
 1:	HVRET
 	SET_SIZE(vdev_intr_generate)
@@ -444,7 +474,7 @@
 	!! %g3 - vino
 	!! %g4 - guest
 	! get this vino's cpu target
-	add	%g4, GUEST_VDEV_STATE, %g6
+	GUEST2VDEVSTATE(%g4, %g6)
 	!! %g6 = &guestp->vdev_state
 	VINO2MAPREG(%g6, %g3, %g5)
 	!! %g5 = vdev_mapregp

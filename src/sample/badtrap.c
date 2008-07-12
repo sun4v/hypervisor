@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)badtrap.c	1.8	05/04/26 SMI"
+#pragma ident	"@(#)badtrap.c	1.9	07/06/07 SMI"
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -78,32 +78,30 @@ stacktrace(uint64_t fp, uint64_t sp)
 		ip = lp + 8;
 		op = ((uint64_t *)(sp+2048-1))+8;
 		for (i = 0; i < 8; i++) {
-			(void)printf("%%o%d=%016lx ", i, op[i]);
-			(void)printf("%%l%d=%016lx ", i, lp[i]);
-			(void)printf("%%i%d=%016lx ", i, ip[i]);
-			(void)printf("\n");
+			(void) printf("%%o%d=%016lx ", i, op[i]);
+			(void) printf("%%l%d=%016lx ", i, lp[i]);
+			(void) printf("%%i%d=%016lx ", i, ip[i]);
+			(void) printf("\n");
 		}
-		(void)printf("\n");
+		(void) printf("\n");
 		sp = fp;
 		fp = ip[6];
 
 	}
-	return;
 }
 
-int
+void
 badtrap(struct trapinfo *ti)
 {
 	uint64_t fp, sp;
-	uint64_t *ip, *lp, *op;
 	int i, j;
-	(void)printf("TT=%02x\n", ti->tt);
-	(void)printf("TL=%02x\n", ti->tl);
-	(void)printf("TPC=%016lx\n", ti->tpc);
-	(void)printf("TnPC=%016lx\n", ti->tnpc);
-	(void)printf("TSTATE=%010lx\n", ti->tstate);
-	(void)printf("PIL=%x\n", ti->pil);
-	(void)printf("\n");
+	(void) printf("TT=%02x\n", ti->tt);
+	(void) printf("TL=%02x\n", ti->tl);
+	(void) printf("TPC=%016lx\n", ti->tpc);
+	(void) printf("TnPC=%016lx\n", ti->tnpc);
+	(void) printf("TSTATE=%010lx\n", ti->tstate);
+	(void) printf("PIL=%x\n", ti->pil);
+	(void) printf("\n");
 
 	flushw();
 
@@ -117,8 +115,8 @@ badtrap(struct trapinfo *ti)
 
 	printf("\n");
 
-	fp = (uint64_t) getfp();
-	sp = (uint64_t) getsp();
+	fp = (uint64_t)getfp();
+	sp = (uint64_t)getsp();
 
 	stacktrace(fp, sp);
 
@@ -131,5 +129,7 @@ badtrap(struct trapinfo *ti)
 	}
 #endif
 
-	while (1) { }
+	while (1) {
+		/* LINTED */
+	}
 }

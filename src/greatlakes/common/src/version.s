@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)version.s	1.4	05/03/01 SMI"
+	.ident	"@(#)version.s	1.7	07/05/03 SMI"
 
 	.file	"version.s"
 
@@ -55,25 +55,72 @@
  */
 
 #include <sys/asm_linkage.h>
+#include <sys/htypes.h>
+#include <offsets.h>
+#include <util.h>
 
 	.section ".text"
-	.global	qversion, eqversion
+	.global	qversion, eqversion, qinfo, eqinfo
 	.align	64
 qversion:
-	.ascii	"@(#)"
-	.ascii	 VERSION
+#ifdef DEBUG
+	.ascii	"@(#)", VERSION, " [", INFO, "]"
+#else
+	.ascii	"@(#)", VERSION
+#endif
 	.asciz	"\r\n"
-	.align	8
 eqversion:
+qinfo:
+	.ascii	INFO
+	.asciz	"\r\n"
+eqinfo:
+	.align	8
+
 #ifdef DEBUG
 	ENTRY_NP(printversion)
-	mov	%g7, %g2
-	set	.-qversion, %g1
-	rd	%pc, %g7
-	sub	%g7, %g1, %g1
+	LABEL_ADDRESS(qversion, %g1)
 	ba	puts
-	mov	%g2, %g7
-	jmp	%g7 + 4
-	nop
+	nop		! tail call
 	SET_SIZE(printversion)
 #endif
+	/*
+	 * dump_version(dest, size)
+	 *
+	 * Copies the version and info  strings into dest up to a max. of
+	 * size bytes
+	 *
+	 * %g2		dest	(clobbered)
+	 * %g3		size	(clobbered)
+	 * %g7		return address
+	 */
+	ENTRY(dump_version)
+
+	brz,pn	%g2, .dump_version_exit
+	nop
+	brlez,pn %g3, .dump_version_exit
+	nop
+
+	LABEL_ADDRESS(qversion, %g4)
+1:
+	ldub	[%g4], %g5
+	brz,a,pn %g5, .dump_info
+	stb	%g5, [%g2]
+	inc	%g4
+	inc	%g2
+	brgz,pt	%g3, 1b
+	dec	%g3
+
+.dump_info:
+	LABEL_ADDRESS(qinfo, %g4)
+1:
+	ldub	[%g4], %g5
+	brz,a,pn %g5, .dump_version_exit
+	stb	%g5, [%g2]
+	inc	%g4
+	inc	%g2
+	brgz,pt	%g3, 1b
+	dec	%g3
+
+.dump_version_exit:
+	HVRET
+	SET_SIZE(dump_version)

@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SYS_ASM_LINKAGE_H
 #define	_SYS_ASM_LINKAGE_H
 
-#pragma ident	"@(#)asm_linkage.h	1.1	05/04/26 SMI"
+#pragma ident	"@(#)asm_linkage.h	1.3	07/04/18 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,7 +79,7 @@ x:							;\
 	/* END CSTYLED */
 
 
-#define DATA_GLOBAL(name)				\
+#define	DATA_GLOBAL(name)				\
 	/* BEGIN CSTYLED */				\
 	.align		8				;\
 	.section	".data"				;\
@@ -88,7 +88,7 @@ x:							;\
 	.type		name, #object			;\
 	/* END CSTYLED */
 
-#define BSS_GLOBAL(name, sz, algn)			\
+#define	BSS_GLOBAL(name, sz, algn)			\
 	/* BEGIN CSTYLED */				\
 	.section	".bss"				;\
 	.align		algn				;\

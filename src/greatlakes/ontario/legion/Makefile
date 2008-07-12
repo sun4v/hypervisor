@@ -40,15 +40,13 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
+# ident	"@(#)Makefile	1.5	07/05/03 SMI"
 #
 
 VARIANT = legion
-
-RESET = ../dumbreset
 
 include ../Makefile.platform
 
@@ -56,22 +54,30 @@ include ../Makefile.platform
 
 OPTIONS = $(PLAT_OPTIONS)
 OPTIONS += -DDEBUG
+OPTIONS += -DFOR_ZEUS
+OPTIONS += -DSIMULATION
 OPTIONS += -DSTRICT_API
 OPTIONS += -UNIAGARA_BRINGUP
 OPTIONS += -DCONFIG_DISK	# Simulated disk support
+OPTIONS += -UCONFIG_PCIE	
 OPTIONS += -UCONFIG_FIRE		# Initialize and configure Fire
 OPTIONS += -UCONFIG_FIRE_EBUS	# Initialize and configure Fire EBus
 OPTIONS += -DCONFIG_IOBYPASS	# Guest I/O bypass access
-OPTIONS += -DCONFIG_SVC
 OPTIONS += -UCONFIG_VBSC_SVC	# VBSC comm channel
-OPTIONS += -UCONFIG_CN_SVC	# Consoles using svc channels
+OPTIONS += -DCONFIG_SVC
 OPTIONS += -UCONFIG_FPGA		# hardware fpga present
 OPTIONS += -DCONFIG_STATICTOD	# Time does not move - pending FPGA support
-OPTIONS += -UDEBUG_LEGION	# Legion-specific debugging aids
-OPTIONS += -UCONFIG_LEGIONBCOPY	# Legion has physical bcopy magic trap
+OPTIONS += -DDEBUG_LEGION	# Legion-specific debugging aids
+OPTIONS += -DCONFIG_LEGIONBCOPY	# Legion has physical bcopy magic trap
 OPTIONS += -UCONFIG_SAS		# Compile without copies for PPG simulation
 OPTIONS += -DCONFIG_HVUART
+OPTIONS += -DCONFIG_CN_UART	# UART console capability for a guest
 OPTIONS += -DCONFIG_VERSION_TEST
+OPTIONS += -UCONFIG_LDC_BRIDGE   # Compile with support for XDC Bridge
+OPTIONS += -DCONFIG_CRYPTO       # Crypto support
+OPTIONS += -DSIMULATION
+OPTIONS += -DFOR_ZEUS
+
 
 ########################################
 

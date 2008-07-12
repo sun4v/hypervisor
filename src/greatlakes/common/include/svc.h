@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SVC_H_
 #define	_SVC_H_
 
-#pragma ident	"@(#)svc.h	1.6	05/08/14 SMI"
+#pragma ident	"@(#)svc.h	1.10	07/05/30 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,7 +64,6 @@ extern "C" {
 #define	XPID_GUEST(n)	(XPID_GUESTBASE + (n))
 
 #define	SID_CONSOLE	0
-#define	SID_NVRAM	1
 #define	SID_ERROR	2
 #define	SID_VBSC_CTL	3
 #define	SID_ECHO	4
@@ -105,30 +104,85 @@ extern "C" {
 #define	SVC_REG_RECV	0x8
 #define	SVC_REG_SEND	0xC
 
+/* fixed services between HV and VBSC */
+#define	VBSC_HV_ERRORS_SVC_SID		0x2
+#define	VBSC_HV_ERRORS_SVC_XID		0x2
+#define	VBSC_HV_ERRORS_SVC_FLAGS	0x35
+#define	VBSC_HV_ERRORS_SVC_MTU		0x200
+
+#define	VBSC_DEBUG_SVC_SID		0x3
+#define	VBSC_DEBUG_SVC_XID		0x2
+#define	VBSC_DEBUG_SVC_FLAGS		0x35
+#define	VBSC_DEBUG_SVC_MTU		0x200
+
+
+/* May not modify condition codes */
+#define	LOCK(r_base, offset, r_tmp, r_tmp1)	\
+	.pushlocals				;\
+	add	r_base, offset, r_tmp		;\
+	sub	%g0, 1, r_tmp1			;\
+1:	casx	[r_tmp], %g0, r_tmp1		;\
+	brlz,pn r_tmp1, 1b			;\
+	  sub	%g0, 1, r_tmp1			;\
+	.poplocals
+
+/* May not modify condition codes */
+/* watchout!! the branch will use the delay slot.. */
+#define	TRYLOCK(r_base, offset, r_tmp0, r_tmp1)	\
+	add	r_base, offset, r_tmp0		;\
+	sub	%g0, 1, r_tmp1			;\
+	casx	[r_tmp0], %g0, r_tmp1		;\
+	brlz,pn r_tmp1, herr_wouldblock		;
+
+#ifdef SVCDEBUG
+#define	TRACE(x)	PRINT(x); PRINT("\r\n")
+#define	TRACE1(x)	PRINT(x); PRINT(": "); PRINTX(%o0); PRINT("\r\n")
+
+#define	TRACE2(x)	\
+	PRINT(x); PRINT(": ");\
+	PRINTX(%o0)	;\
+	PRINT(", ")	;\
+	PRINTX(%o1)	;\
+	PRINT("\r\n")	;
+
+#define	TRACE3(x)	\
+	PRINT(x); PRINT(": ");\
+	PRINTX(%o0)	;\
+	PRINT(", ")	;\
+	PRINTX(%o1)	;\
+	PRINT(", ")	;\
+	PRINTX(%o2)	;\
+	PRINT("\r\n")	;
+#else
+#define	TRACE(s)
+#define	TRACE1(s)
+#define	TRACE2(s)
+#define	TRACE3(s)
+#endif
+
+#ifdef INTR_DEBUG
+#define	SEND_SVC_TRACE						\
+	PRINT("svc root: "); PRINTX(r_root);			\
+	PRINT(", "); PRINTX(r_svc); PRINT("\r\n");
+#else
+#define	SEND_SVC_TRACE
+#endif
+
+#define	SEND_SVC_PACKET(r_root, r_svc, sc0, sc1, sc2, sc3)	\
+	SEND_SVC_TRACE					;	\
+	ldx	[r_root + HV_SVC_DATA_TXBASE], sc0 ;		\
+	ldx	[r_svc + SVC_CTRL_SEND + SVC_LINK_PA], sc1;	\
+	ldx	[r_svc + SVC_CTRL_SEND + SVC_LINK_SIZE], sc2;	\
+	SMALL_COPY_MACRO(sc1, sc2, sc0, sc3)	;		\
+	ldx	[r_root + HV_SVC_DATA_TXCHANNEL], sc1 ;		\
+	mov	1, sc0; 					\
+	ldx	[r_svc + SVC_CTRL_SEND + SVC_LINK_SIZE], sc2;	\
+	sth	sc2, [sc1 + FPGA_Q_SIZE] ;			\
+	stb	sc0, [sc1 + FPGA_Q_SEND] ;
+
 #ifdef _ASM
 
-/*
- * tname - the tables name; (symbol will be created)
- * sid	- the service id
- * recv - your recv callback function (0 is none)
- * send - your send callback function (0 is none)
- */
-/* BEGIN CSTYLED */
-#define	SVC_REGISTER(tname, xid, sid, recv, send)	\
-	ba	svc/**/tname/**/end	;\
-	  rd	%pc, %g2		;\
-svc/**/tname:				;\
-	.word	xid			;\
-	.word	sid			;\
-	.word	recv - svc/**/tname	;\
-	.word	send - svc/**/tname	;\
-svc/**/tname/**/end:			;\
-	add	%g2, 4, %g2		;\
-	ba	svc_register		;\
-	rd	%pc, %g7		;\
-/* END CSTYLED */
-
-#define UNLOCK(r_base, offset)		\
+#define	UNLOCK(r_base, offset)		\
 	stx	%g0, [r_base + offset]
 
 #endif /* _ASM */
@@ -157,6 +211,8 @@ struct svc_callback {
 	uint64_t	cookie; 	/* your callback cookie */
 };
 
+typedef struct svc_ctrl svc_ctrl_t;
+
 struct svc_ctrl {
 	uint32_t	xid;
 	uint32_t	sid;
@@ -180,6 +236,10 @@ struct svc_pkt {
 	uint16_t	sid;			/* svcid */
 };
 
+#define	MAX_SVCS	9
+
+typedef struct hv_svc_data hv_svc_data_t;
+
 struct hv_svc_data {
 	uint64_t	rxbase;			/* PA of RX buffer (SRAM) */
 	uint64_t	txbase;			/* PA of TX buffer (SRAM) */
@@ -193,7 +253,7 @@ struct hv_svc_data {
 	struct svc_ctrl *senddh;		/* holding.. (nack/busy) */
 	struct svc_ctrl *senddt;
 	uint64_t	lock;			/* need mutex?? */
-	struct svc_ctrl svcs[1];		/* the svc buffers follow */
+	struct svc_ctrl svcs[MAX_SVCS];		/* the svc buffers follow */
 };
 
 

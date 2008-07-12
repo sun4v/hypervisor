@@ -42,13 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)l2subr.s	1.10	05/11/04 SMI"
-
-	.file	"l2subr.s"
+	.ident	"@(#)l2subr.s	1.11	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -382,8 +380,7 @@
 	! return
 	mov	%g6, %g1		! restore input args
 	mov	%g5, %g7		! restore input args
-	jmp	%g7 + 4
-	nop
+	HVRET
 	SET_SIZE(l2_flush_line)
 
 	/*
@@ -455,7 +452,6 @@
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 1
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
@@ -467,72 +463,60 @@
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 2
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 3
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 4
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 5
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 6
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
 	add	%g5, 8, %g5		! increment pointer
 	! way 0, word 7
 	add	%g4, 8, %g4		! next word
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	andn	%g4, %g3, %g4		! EVEN
 	ldx	[%g4], %g6		! read even 32-bit
 	stx	%g6, [%g5]		! store even 32-bit data
 	add	%g5, 8, %g5		! increment pointer
-	set	(1 << 22), %g3		! ODDEVEN = 1
 	or	%g4, %g3, %g4		! select ODD
 	ldx	[%g4], %g6		! read odd 32-bit
 	stx	%g6, [%g5]		! store odd 32-bit data
@@ -540,13 +524,11 @@
 	! next way
 	srlx	%g2, L2_WAY_SHIFT, %g2	! current way
 	add	%g2, 1, %g2		! next way
-	cmp	%g2, 12
-	bnz	2f			! read tag and loop back if not done
+	cmp	%g2, L2_NUM_WAYS
+	bz	2f			! read tag and loop back if not done
 	nop
-	ba,a	3f			! done
 
 	! read tag
-2:
 	mov	%g7, %g6		! save original return
 	ba	get_l2_tag_by_way
 	rd	%pc, %g7
@@ -556,11 +538,10 @@
 	ba	1b
 	sllx	%g2, L2_WAY_SHIFT, %g2	! shift to way field
 
-3:
+2:
 	! set %g2 back to original value based on %g5
 	sub	%g5, 0x618, %g2		! restore %g2
-	jmp	%g7 + 4
-	nop
+	HVRET
 	SET_SIZE(dump_l2_set_tag_data_ecc)
 
 	/*
@@ -596,7 +577,7 @@
 	mov	%g6, %g7
 	! done, return not found
 	jmp	%g7 + 4
-	set	3, %g4			! return not found
+	set	L2_LINE_NOT_FOUND, %g4	! return not found
 
 	! tag match found
 1:
@@ -618,15 +599,15 @@
 	mov	%g6, %g7
 	! return clean
 	jmp	%g7 + 4
-	set	0, %g4			! return clean
+	set	L2_LINE_CLEAN, %g4			! return clean
 
 	! return dirty
 2:
 	jmp	%g7 + 4
-	set	1, %g4			! return dirty
+	set	L2_LINE_DIRTY, %g4			! return dirty
 
 	! return invalid
 0:
 	jmp	%g7 + 4
-	set	2, %g4			! return invalid
+	set	L2_LINE_INVALID, %g4			! return invalid
 	SET_SIZE(check_l2_state)

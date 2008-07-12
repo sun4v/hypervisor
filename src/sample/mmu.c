@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)mmu.c	1.4	05/04/26 SMI"
+#pragma ident	"@(#)mmu.c	1.5	07/06/07 SMI"
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/types.h>
@@ -58,19 +58,19 @@
 extern int hv_mmu_map_addr(uint64_t va, int ctx, uint64_t tte, int flags);
 extern int hv_mmu_demap_page(uint64_t va, int ctx, int flags);
 
-/* 
+/*
  * Sun4V TTE bits
  */
-#define NPABITS		(43)
-#define TTE_WRITABLE	(1 << 6)
-#define TTE_PRIV	(1 << 8)
-#define TTE_EFFECT	(1 << 11)
-#define TTE_CV		(1 << 9)
-#define TTE_CP		(1 << 10)
+#define	NPABITS		(43)
+#define	TTE_WRITABLE	(1 << 6)
+#define	TTE_PRIV	(1 << 8)
+#define	TTE_EFFECT	(1 << 11)
+#define	TTE_CV		(1 << 9)
+#define	TTE_CP		(1 << 10)
 
-#define TTE_64K		(0xa)
-#define TTE_512K	(0xc)
-#define TTE_4M		(0xe)
+#define	TTE_64K		(0xa)
+#define	TTE_512K	(0xc)
+#define	TTE_4M		(0xe)
 
 int
 map_addr(uint64_t va, uint64_t ra, uint64_t size, int mmu)
@@ -78,7 +78,7 @@ map_addr(uint64_t va, uint64_t ra, uint64_t size, int mmu)
 	int mode;
 	uint64_t sz;
 	uint64_t tte;
-	if ((int64_t) (ra << (64-NPABITS)) < 0)
+	if ((int64_t)(ra << (64-NPABITS)) < 0)
 		mode = TTE_PRIV|TTE_EFFECT|TTE_WRITABLE;
 	else
 		mode = TTE_PRIV|TTE_CV|TTE_CP|TTE_WRITABLE;
@@ -95,29 +95,29 @@ map_addr(uint64_t va, uint64_t ra, uint64_t size, int mmu)
 		break;
 	default:
 		printf("Illegal size %x\n", size);
-		return 1;
+		return (1);
 	}
-	tte = sz | ra| mode | ( 1ULL << 63);
+	tte = sz | ra | mode | (1ULL << 63);
 #if 0
 	printf("mmu map va=%x tte=%x\n", va, tte);
 #endif
-	return hv_mmu_map_addr(va, 0, tte, mmu);
+	return (hv_mmu_map_addr(va, 0, tte, mmu));
 }
 
 int
 map_iaddr(uint64_t va, uint64_t ra, uint64_t size)
 {
-	return map_addr(va, ra, size, 2);
+	return (map_addr(va, ra, size, 2));
 }
 
 int
 map_daddr(uint64_t va, uint64_t ra, uint64_t size)
 {
-	return map_addr(va, ra, size, 1);
+	return (map_addr(va, ra, size, 1));
 }
 
-int 
+int
 unmap_addr(uint64_t va, int ctx)
 {
-	return hv_mmu_demap_page(va, ctx, 3);
+	return (hv_mmu_demap_page(va, ctx, 3));
 }

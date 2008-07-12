@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)begin.s	1.4	04/07/20 SMI"
+	.ident	"@(#)begin.s	1.5	06/10/26 SMI"
 
 	.file	"begin.s"
 
@@ -62,3 +62,6 @@
 	.type begin, #function
 begin:
 
+	.section ".data"
+	.global _start_data
+_start_data:

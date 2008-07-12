@@ -40,10 +40,10 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile.family	1.1	06/04/26 SMI"
+# ident	"@(#)Makefile.family	1.7	07/06/07 SMI"
 #
 
 FAMILY = greatlakes
@@ -53,8 +53,13 @@ include $(TOP)/Makefile.master
 DATE :sh = date +\%Y"/"\%m"/"\%d
 TIME :sh = date +\%H":"\%M
 RELEASE_VERSION$(RELEASE_VERSION) = 0.1
-QVERSION = "Hypervisor "$(RELEASE_VERSION)" "$(DATE)" "$(TIME)" ["$(FAMILY)":"$(PLATFORM)":"$(VARIANT)"]"
+QVERSION = Hypervisor $(RELEASE_VERSION) $(DATE) $(TIME)
+QINFO = $(FAMILY):$(PLATFORM):$(VARIANT)
 
-CPPFLAGS = -I$(PLATFORM_INC) -I$(FAMILY_INC) -I$(COMMON_INC) -I. $(OPTIONS)
-CFLAGS = -xarch=v9a
+ALL_INC = -I$(PLATFORM_INC) -I$(FAMILY_INC) -I$(COMMON_INC) -I$(SUN_INC) -I.
+CPPFLAGS = $(ALL_INC) $(OPTIONS)
+CFLAGS = -xarch=v9a -KPIC -xO3 -errwarn=%all
 ASFLAGS = -xarch=v9d -D_ASM -P -xregsym=no $(CPPFLAGS)
+
+FAMILYC_SRCS = svc_init.c
+FAMILYC_LINT_SRCS = $(FAMILY_SRC)/svc_init.c

@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)mmuinit.s	1.6	05/03/31 SMI"
+	.ident	"@(#)mmuinit.s	1.8	07/06/07 SMI"
 
 	.file	"mmuinit.s"
 
@@ -85,21 +85,35 @@ mmu_init(uint64_t rabase)
 	mov	%g0, %o3		! Mode bits = 0
 
 	setx	mmu_miss_info_area0, %o2, %o1	! VA
-	add	%o1, %i3, %o0		! VA->RA
+	sub	%o1, %i3, %o0		! VA->RA
 	mov	MMU_FAULT_AREA_CONF, %o5
 	ta	FAST_TRAP
+	brnz	%o0, 2f
+	nop
 
 	setx	1f, %o2, %o1		! VA
 	mov	1, %o0
 	mov	MMU_ENABLE, %o5
 	ta	FAST_TRAP
-1:	add	%i7, %i3, %i7		! RA->VA
+1:
+	brnz	%o0, 2f
+	nop
+	add	%i7, %i3, %i7		! RA->VA
 	ret
 	restore
+2:
+	mov	API_EXIT, %o5
+	ta	CORE_TRAP
 	SET_SIZE(mmu_init)
 #endif /* lint */
 
 
+#if defined(lint)
+void
+setup_itlb_entry(uint64_t va, uint64_t pa, uint64_t size, uint64_t tte_mode)
+{
+}
+#else
 #define NPABITS		(43)
 #define TTE_WRITABLE	(1 << 6)
 #define TTE_PRIV	(1 << 8)
@@ -136,9 +150,14 @@ mmu_init(uint64_t rabase)
 	! %o2 = TTE
 	! %o3 = ITLB
 	add	%g0, MMU_MAP_PERM_ADDR,  %o5
-	ta	%g0+FAST_TRAP
+	ta	FAST_TRAP
+	brnz	%o0, 1f
+	nop
 	retl
 	nop
+1:
+	mov	API_EXIT, %o5
+	ta	CORE_TRAP
 	SET_SIZE(setup_itlb_entry)
 
 	! %o0 = VA
@@ -166,7 +185,13 @@ mmu_init(uint64_t rabase)
 	! %o2 = TTE
 	! %o3 = DTLB
 	add	%g0, MMU_MAP_PERM_ADDR,  %o5
-	ta	%g0+FAST_TRAP
+	ta	FAST_TRAP
+	brnz	%o0, 1f
+	nop
 	retl
 	nop
+1:
+	mov	API_EXIT, %o5
+	ta	CORE_TRAP
 	SET_SIZE(setup_dtlb_entry)
+#endif /* lint */

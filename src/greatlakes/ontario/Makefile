@@ -40,15 +40,15 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.1	06/04/26 SMI"
+# ident	"@(#)Makefile	1.2	07/05/03 SMI"
 #
 
 TOP = ../..
 
-SUBDIRS = legion release debug t1_fpga include
+SUBDIRS = legion release debug
 
 include $(TOP)/Makefile.master
 

@@ -42,13 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)vpci_fire.s	1.33	06/04/26 SMI"
-
-	.file	"vpci_fire.s"
+	.ident	"@(#)vpci_fire.s	1.51	07/07/17 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -59,17 +57,34 @@
 #include <mmu.h>
 
 #include <guest.h>
+#include <strand.h>
 #include <offsets.h>
 #include <debug.h>
-#include <cpu.h>
 #include <util.h>
 #include <abort.h>
+#include <fire.h>
+#include <vdev_intr.h>
 #include <vpci_errs.h>
+#include <ldc.h>
 
 #if defined(CONFIG_FIRE)
 
-#define REGNO2OFFSET(no, off)		sllx	no, 3, off
-#define PCIDEV2FIREDEV(pci, fire)	sllx	pci, 4, fire
+#define	REGNO2OFFSET(no, off)		sllx	no, 3, off
+#define	PCIDEV2FIREDEV(pci, fire)	sllx	pci, 4, fire
+
+/*
+ * CHK_FIRE_LINK_STATUS - Check status of Fire link. Returns status
+ * of 0 if the link is down.
+ *
+ * Delay Slot:	 not safe in a delay slot
+ */
+#define CHK_FIRE_LINK_STATUS(firecookie, status, scr1)		 \
+	ldx     [firecookie + FIRE_COOKIE_PCIE], status		;\
+	set     FIRE_PLC_TLU_CTB_TLR_TLU_STS, scr1		;\
+	ldx     [status + scr1], scr1				;\
+	and     scr1, FIRE_TLU_STS_STATUS_MASK, scr1		;\
+	cmp     scr1, FIRE_TLU_STS_STATUS_DATA_LINK_ACTIVE	;\
+	movne   %xcc, 0, status
 
 #if FIRE_MSIEQ_SIZE != 0x28
 #error "FIRE_MSIEQ_SIZE changed, breaks the shifts below"
@@ -146,6 +161,12 @@
 	 * need to be reflected in the Niagara JBI_TRANS_TIMEOUT
 	 * register.  See the setup_jbi routine in setup.s.
 	 */
+#ifdef FIRE_ERRATUM_20_18
+	/*
+	 * Also, see below where NPRW_EN is masked off for Fire 2.0 but
+	 * is set here for Fire 2.1 and later.
+	 */
+#endif
 	.xword	0x00000000da130001, FIRE_PLC_TLU_CTB_TLR_TLU_CTL
 	.xword	0xffffffffffffffff, FIRE_PLC_TLU_CTB_TLR_OE_LOG
 	.xword	0xffffffffffffffff, FIRE_PLC_TLU_CTB_TLR_OE_ERR_RW1C_ALIAS
@@ -224,14 +245,14 @@
 	!! %g7 = return PC
 	ldx	[%g4], %g2
 	and	%g2, FIRE_JBUS_ID_MR_MASK, %g2
-	cmp	%g2, FIRE_REV_2
-	be,pn	%xcc, 1f
+	cmp	%g2, FIRE_REV_2_0
+	bgeu,pn	%xcc, 1f
 	nop
 #ifdef DEBUG
 	PRINT("HV:Unsupported Fire Version\r\n")
 #endif
 	ba	hvabort
-	mov	ABORT_UNSUPPORTED_FIRE, %g1
+	rd	%pc, %g1
 
 1:
 	ldx	[%g3 + 8], %g5	! Offset
@@ -248,13 +269,38 @@
 
 	ldx	[%g1 + FIRE_COOKIE_PCIE], %g4
 	ldx	[%g1 + FIRE_COOKIE_PCIE+FIRE_COOKIE_SIZE], %g5
+	!! %g4 leaf A base address
+	!! %g5 leaf B base address
 	brz,pn	%g4, 3f
 	nop
 1:
 	ldx	[%g3 + 8], %g6	! Offset
 	add	%g6, 1, %g2
-	brz,pn	%g2, 2f
+	brz,pn	%g2, 2f		! End of table?
 	ldx	[%g3 + 0], %g2	! Data
+
+#ifdef FIRE_ERRATUM_20_18
+	/*
+	 * Don't set the NPWR_EN bit in TLU CTL for Fire 2.0
+	 */
+	set	FIRE_PLC_TLU_CTB_TLR_TLU_CTL, %l0
+	cmp	%g6, %l0
+	bne,pt	%xcc, 4f
+	nop
+
+	/* Check Fire version */
+	ldx	[%g1 + FIRE_COOKIE_JBUS], %l0
+	brz,pn	%l0, 4f		! shouldn't happen at this point
+	nop
+	ldx	[%l0], %l0
+	and	%l0, FIRE_JBUS_ID_MR_MASK, %l0
+	cmp	%l0, FIRE_REV_2_0
+	bne,pt	%xcc, 4f
+	nop
+	set	FIRE_TLU_CTL_NPWR_EN, %l0
+	andn	%g2, %l0, %g2
+4:
+#endif
 	add	%g3, 16, %g3
 	stx	%g2, [%g4 + %g6]
 	ba	1b
@@ -262,6 +308,11 @@
 2:
 	! Setup Interrupt Mondo Data 0 register
 	set	FIRE_DLC_IMU_RDS_MSI_INT_MONDO_DATA_0_REG, %g6
+	stx	%g0, [%g4 + %g6]	! Leaf A
+	stx	%g0, [%g5 + %g6]	! Leaf B
+
+	! Setup Interrupt Mondo Data 1 register
+	set	FIRE_DLC_IMU_RDS_MSI_INT_MONDO_DATA_1_REG, %g6
 	set	FIRE_A_AID, %g2
 	sllx	%g2, FIRE_DEVINO_SHIFT, %g2
 	stx	%g2, [%g4 + %g6]	! Leaf A
@@ -269,16 +320,11 @@
 	sllx	%g2, FIRE_DEVINO_SHIFT, %g2
 	stx	%g2, [%g5 + %g6]	! Leaf B
 
-	! Setup Interrupt Mondo Data 1 register
-	set	FIRE_DLC_IMU_RDS_MSI_INT_MONDO_DATA_1_REG, %g6
-	stx	%g0, [%g4 + %g6]	! Leaf A
-	stx	%g0, [%g5 + %g6]	! Leaf B
-
 	! Setup interrupt mappings
 	! mondo 62 leafs A and B
 	! mondo 63 only leaf A
-	CPU_STRUCT(%g4)
-	ldub	[%g4 + CPU_PID], %g2
+	STRAND_STRUCT(%g4)	/* FIXME: what does it want the PID for?*/
+	ldub	[%g4 + STRAND_ID], %g2
 
 	mov %g0, %g5
 	! Add CPU number
@@ -366,9 +412,365 @@
 	! Leaf B  EQ Base Address
 	stx	%g5, [%g4 + %g6]
 3:
-	jmp	%g7 + 4
+
+#ifdef FIRE_ERRATUM_20_18
+
+#define	BDF2DEV(b, d, f) ((((b) << 8) | ((d) << 5) | (f)) << 8)
+#define	DV(v, d)	(((d) << 16) | (v)) /* for 32-bit ASI_L */
+#define	VENDOR_PLX	0x10b5
+#define	DEVICE32_PLX8532 DV(VENDOR_PLX, 0x8532)
+#define	DEVICE32_PLX8516 DV(VENDOR_PLX, 0x8516)
+
+	/* Check Fire version for 2.0 */
+	ldx	[%g1 + FIRE_COOKIE_JBUS], %l0
+	brz,pn	%l0, .skip_plx_workaround  ! shouldn't happen
 	nop
+	ldx	[%l0], %l0
+	and	%l0, FIRE_JBUS_ID_MR_MASK, %l0
+	cmp	%l0, FIRE_REV_2_0
+	bne,pt	%xcc, .skip_plx_workaround
+	nop
+
+.check_plx_leafa:
+	/* Check if link is up, it should be for the PLX leaf on Ontario */
+	!! %g3 leaf A pcie base address
+	clr	%l4
+1:
+	cmp	%l4, 20		! 20 * 50msec = 1 sec max delay
+	bge,pn	%xcc, .skip_plx_leafa
+	.empty
+	CPU_MSEC_DELAY(50, %l5, %l6, %l7)
+	set	FIRE_PLC_TLU_CTB_TLR_TLU_STS, %l0
+	ldx	[%g3 + %l0], %l0
+	and	%l0, FIRE_TLU_STS_STATUS_MASK, %l0
+	cmp	%l0, FIRE_TLU_STS_STATUS_DATA_LINK_ACTIVE
+	bne,pt	%xcc, 1b
+	inc	%l4
+
+	/* calculate PA of config address for BDF 2.0.0, offset 0 */
+	set	BDF2DEV(2, 0, 0), %l0
+	PCIDEV2FIREDEV(%l0, %l1)
+	ldx	[%g1 + FIRE_COOKIE_CFG], %l2
+	add	%l2, %l1, %l1
+	!! %l1 PA of config address of BDF 2.0.0
+
+	/* fire link up, but downlink needs a little more time */
+	CPU_MSEC_DELAY(200, %l5, %l6, %l7)
+	/* Check for PLX 8532/8516 */
+	lduwa	[%l1]ASI_P_LE, %l2
+	set	DEVICE32_PLX8532, %l3
+	cmp	%l2, %l3
+	be,pt	%xcc, 1f
+	nop
+	set	DEVICE32_PLX8516, %l3
+	cmp	%l2, %l3
+	bne,pn	%xcc, .skip_plx_leafa
+	nop
+1:
+	stx	%l1, [%g1 + FIRE_COOKIE_EXTRACFGRDADDRPA]
+#ifdef PLX_ERRATUM_LINK_HACK
+	mov	%g7, %l7
+	mov	%g3, %l2
+	!! %l1 = plx config base addr
+	!! %l2 = fire leaf base addr
+	HVCALL(fire_plx_reset_hack)
+	mov	%l7, %g7
+#endif /* PLX_ERRATUM_LINK_HACK */
+.skip_plx_leafa:
+
+.check_plx_leafb:
+	/* Check if link is up, it should be for the PLX leaf on Ontario */
+	!! %g4 leaf B pcie base address
+	clr	%l4
+1:
+	cmp	%l4, 20			! 20 * 50msec = 1 sec delay max
+	bge,pn	%xcc, .skip_plx_leafb
+	.empty
+	CPU_MSEC_DELAY(50, %l5, %l6, %l7)
+	set	FIRE_PLC_TLU_CTB_TLR_TLU_STS, %l0
+	ldx	[%g4 + %l0], %l0
+	and	%l0, FIRE_TLU_STS_STATUS_MASK, %l0
+	cmp	%l0, FIRE_TLU_STS_STATUS_DATA_LINK_ACTIVE
+	bne,pt	%xcc, 1b
+	inc	%l4
+
+	/* calculate PA of config address for BDF 2.0.0, offset 0 */
+	set	BDF2DEV(2, 0, 0), %l0
+	PCIDEV2FIREDEV(%l0, %l1)
+	ldx	[%g1 + FIRE_COOKIE_SIZE + FIRE_COOKIE_CFG], %l2
+	add	%l2, %l1, %l1
+	!! %l1 PA of config address of BDF 2.0.0
+
+	/* fire link up, but downlink needs a little more time */
+	CPU_MSEC_DELAY(200, %l5, %l6, %l7)
+	/* Check for PLX 8532/8516 */
+	lduwa	[%l1]ASI_P_LE, %l2
+	set	DEVICE32_PLX8532, %l3
+	cmp	%l2, %l3
+	be,pt	%xcc, 1f
+	nop
+	set	DEVICE32_PLX8516, %l3
+	cmp	%l2, %l3
+	bne,pn	%xcc, .skip_plx_leafb
+	nop
+1:
+	stx	%l1, [%g1 + FIRE_COOKIE_SIZE + FIRE_COOKIE_EXTRACFGRDADDRPA]
+#ifdef PLX_ERRATUM_LINK_HACK
+	mov	%g7, %l7
+	mov	%g4, %l2
+	!! %l1 = plx config base addr
+	!! %l2 = fire leaf base addr
+	!! %g3 = fire leaf A base
+	!! %g4 = fire leaf B base
+	HVCALL(fire_plx_reset_hack)
+	mov	%l7, %g7
+#endif /* PLX_ERRATUM_LINK_HACK */
+.skip_plx_leafb:
+
+.skip_plx_workaround:
+#endif
+	HVRET
 	SET_SIZE(fire_init)
+
+
+/*
+ * void fire_config_bypass(fire_dev_t *firep, bool_t enable);
+ *
+ *	Configures the bypass mode of a given fire PCI-E root complex.
+ *
+ *	%o0	= fire_dev_t *
+ *	%o1	= enable (true) / disable (false) bypass mode
+ */
+
+	ENTRY(fire_config_bypass)
+
+	ldx	[%o0 + FIRE_COOKIE_PCIE], %o2
+	mov	FIRE_MMU_CSR_BE, %o3
+	movrnz	%o1, %o3, %o1
+
+	! Leaf MMU_CTRL reg
+	set	FIRE_DLC_MMU_CTL, %o4
+	ldx	[%o2 + %o4], %o5
+	andn	%o5, %o3, %o5
+	or	%o5, %o1, %o5
+	stx	%o5, [%o2 + %o4]
+
+	retl
+	  nop
+	SET_SIZE(fire_config_bypass)
+
+
+
+#ifdef PLX_ERRATUM_LINK_HACK
+/*
+ * Workaround for PLX link training problem
+ */
+
+#define	PLX_HACK_STATUS_LEAFB_SHIFT	4
+#define	PLX_HACK_STATUS_PORT1		0x1
+#define	PLX_HACK_STATUS_PORT2		0x2
+#define	PLX_HACK_STATUS_PORT8		0x4
+#define	PLX_HACK_STATUS_PORT9		0x8
+
+#define	PLX_PORT_OFFSET			0x1000
+#define	PLX_UE_STATUS_REG_OFFSET	0xfb8
+#define	PLX_UESR_TRAINING_ERROR		0x1
+#define	PLX_VC0_RSRC_STATUS_HI		0x162
+#define	PLX_VC0_RSRC_NEGPEND_SHIFT	0x1
+
+#define	PLX_PCIE_CAPABILITY_HI	0x6a
+#define	PLX_PCIE_PORTTYPE_MASK	0xf0
+#define	PLX_PCIE_PORTTYPE_UPSTREAM	0x50
+#define	PLX_CONFIG_CMD	0x4
+#define	PLX_CONFIG_CMD_MEMENABLE	0x2
+#define	PLX_CONFIG_BAR0	0x10
+
+
+/*
+ * Register usage:
+ * %l1 - config base physical address
+ * %l3 - mem32 base physical address
+ */
+
+/* Uses %l4/%l5 as scratch */
+#define	PLX_MEM_STOREB(value, offset)		\
+	set	value, %l4			;\
+	set	offset, %l5			;\
+	stub	%l4, [%l3 + %l5]
+
+/* Uses %l4/%l5 as scratch */
+#define	PLX_MEM_STOREW(value, offset)		\
+	set	value, %l4			;\
+	set	offset, %l5			;\
+	stuha	%l4, [%l3 + %l5]ASI_P_LE
+
+/* Uses %l4/%l5 as scratch */
+#define	PLX_MEM_STOREL(value, offset)		\
+	set	value, %l4			;\
+	set	offset, %l5			;\
+	stuwa	%l4, [%l3 + %l5]ASI_P_LE
+
+/* Uses %l5 as scratch */
+#define	PLX_MEM_FETCHW(offset, dest)		\
+	set	offset, %l5			;\
+	lduha	[%l3 + %l5]ASI_P_LE, dest
+
+/* Uses %l5 as scratch */
+#define	PLX_MEM_FETCHL(offset, dest)		\
+	set	offset, %l5			;\
+	lduwa	[%l3 + %l5]ASI_P_LE, dest
+
+/* Uses %l4/%l5 as scratch */
+#define	PLX_CFG_STOREW(value, offset)		\
+	set	value, %l4			;\
+	set	offset, %l5			;\
+	stuha	%l4, [%l1 + %l5]ASI_P_LE
+
+#define	PLX_CFG_STOREREGW(reg, offset)	\
+	set	offset, %l5			;\
+	stuha	reg, [%l1 + %l5]ASI_P_LE
+
+/* Uses %l4/%l5 as scratch */
+#define	PLX_CFG_STOREL(value, offset)		\
+	set	value, %l4			;\
+	set	offset, %l5			;\
+	stuwa	%l4, [%l1 + %l5]ASI_P_LE
+
+#define	PLX_CFG_STOREREGL(reg, offset)		\
+	set	offset, %l5			;\
+	stuwa	reg, [%l1 + %l5]ASI_P_LE
+
+/* Uses %l5 as scratch */
+#define	PLX_CFG_FETCHB(offset, dest)		\
+	set	offset, %l5			;\
+	ldub	[%l1 + %l5], dest
+
+/* Uses %l5 as scratch */
+#define	PLX_CFG_FETCHW(offset, dest)		\
+	set	offset, %l5			;\
+	lduha	[%l1 + %l5]ASI_P_LE, dest
+
+/* Uses %l5 as scratch */
+#define	PLX_CFG_FETCHL(offset, dest)		\
+	set	offset, %l5			;\
+	lduwa	[%l1 + %l5]ASI_P_LE, dest
+
+/* Uses %g5/%g6 as scratch, invokes PLX_FETCH */
+#define	PLX_TRAINING_ERROR_nz(port)				\
+	PLX_MEM_FETCHW(((port * PLX_PORT_OFFSET) +		\
+	    PLX_VC0_RSRC_STATUS_HI), %g5)			;\
+	srlx	%g5, PLX_VC0_RSRC_NEGPEND_SHIFT, %g5		;\
+	PLX_MEM_FETCHL(((port * PLX_PORT_OFFSET) +		\
+	    PLX_UE_STATUS_REG_OFFSET), %g6)			;\
+	and	%g5, %g6, %g5					;\
+	btst	PLX_UESR_TRAINING_ERROR, %g5
+
+
+/*
+ * fire_plx_reset_hack - work around PLX link training problem
+ *
+ * %l1 PLX config space address
+ * %l2 Fire leaf base
+ * %g1 base of Fire state structures ("cookies")
+ * %g3 fire leaf A base
+ * %g4 fire leaf B base
+ * %l3-%l6,%g5,%g6 available
+ */
+	ENTRY_NP(fire_plx_reset_hack)
+	/*
+	 * See if this hack has been disabled by the SP
+	 */
+	ldx	[%i0 + CONFIG_IGNORE_PLX_LINK_HACK], %l6
+	brz,pt	%l6, 0f
+	nop
+	HVRET
+0:
+
+	/*
+	 * Check for rev AA and upstream port
+	 */
+	PLX_CFG_FETCHB(0x8, %l6)
+	cmp	%l6, 0xaa
+	bne,pt	%xcc, .fire_plx_reset_hack_done
+	nop
+
+	PLX_CFG_FETCHW(PLX_PCIE_CAPABILITY_HI, %l6)
+	and	%l6, PLX_PCIE_PORTTYPE_MASK, %l6
+	cmp	%l6, PLX_PCIE_PORTTYPE_UPSTREAM
+	bne,pt	%xcc, .fire_plx_reset_hack_done
+	nop
+
+	/*
+	 * Get MEM32 base address for the appropriate leaf
+	 */
+	setx	FIRE_BAR(MEM32(A)), %l6, %l3
+	setx	FIRE_BAR(MEM32(B)), %l6, %l4
+	cmp	%l2, %g3	! compare current leaf to leaf A addr
+	movne	%xcc, %l4, %l3
+	!! %l3 = plx mem32 base addr
+
+	/* It's probably not enabled to respond in cmd register */
+	PLX_CFG_FETCHW(PLX_CONFIG_CMD, %g5)
+	or	%g5, PLX_CONFIG_CMD_MEMENABLE, %g5
+	PLX_CFG_STOREREGW(%g5, PLX_CONFIG_CMD)
+
+	/* Map in PLX mem space BAR */
+	PLX_CFG_STOREREGL(%g0, PLX_CONFIG_BAR0)
+	mov	PLX_CONFIG_BAR0, %l5	! BAR0
+	lduwa	[%l1 + %l5]ASI_P_LE, %g0 ! force completion of stores
+
+	/*
+	 * If the link is not up, and a training error was logged
+	 * then try to retrain
+	 */
+	!! %l3 = plx mem32 base addr
+	!! %l2 = fire pcie leaf base addr
+	!! %l1 = plx cfg base addr
+
+	/*
+	 * Check for link training errors
+	 */
+	mov	0, %o0		! failure flag
+	PLX_TRAINING_ERROR_nz(1) ! port 1
+	bnz,a,pt %xcc, 0f
+	  bset	PLX_HACK_STATUS_PORT1, %o0
+0:	PLX_TRAINING_ERROR_nz(2) ! port 2
+	bnz,a,pt %xcc, 0f
+	  bset	PLX_HACK_STATUS_PORT2, %o0
+0:	PLX_TRAINING_ERROR_nz(8) ! port 8
+	bnz,a,pt %xcc, 0f
+	  bset	PLX_HACK_STATUS_PORT8, %o0
+0:	PLX_TRAINING_ERROR_nz(9) ! port 9
+	bnz,a,pt %xcc, 0f
+	  bset	PLX_HACK_STATUS_PORT9, %o0
+0:
+	brz,pt	%o0, .fire_plx_reset_hack_done
+	nop
+
+	/*
+	 * PLX encountered a link training problem, tell vbsc to reset
+	 * the system.
+	 * %o0 contains a bitmask of ports on the plx that failed
+	 * |9|8|2|1|
+	 * For leaf B we shift the bitmask up by 4 bits:
+	 * |B9|B8|B2|B1|A9|A8|A2|A1|
+	 */
+	mov	0, %g1
+	cmp	%l2, %g3
+	movne	%xcc, PLX_HACK_STATUS_LEAFB_SHIFT, %g1
+	sllx	%o0, %g1, %g1
+	HVCALL(vbsc_hv_plxreset)
+	/* spin until vbsc resets the system */
+	ba	.
+	nop
+
+.fire_plx_reset_hack_done:
+	PLX_CFG_STOREREGW(%g0, PLX_CONFIG_CMD)
+
+	HVRET
+	SET_SIZE(fire_plx_reset_hack)
+
+#endif /* PLX_ERRATUM_LINK_HACK */
 
 
 /*
@@ -422,7 +824,7 @@
  * %g2 INO
  * %g3 intr valid state
  * --
- * 
+ *
  * ret0 Fire Cookie (%g1)
  * ret1 INO (%g2)
  */
@@ -536,9 +938,9 @@
 
 	mov	%o0, %g2
 	HVCALL(_fire_intr_gettarget)
-	
+
 	! get the virtual cpuid
-	PID2CPUP(%g3, %g4, %g5)
+	PID2VCPUP(%g3, %g4, %g5, %g6)
 	ldub	[%g4 + CPU_VID], %o1
 
 	HCALL_RET(EOK)
@@ -559,13 +961,15 @@
 	ldx	[%g3 + %g4], %g3
 	srlx	%g3, JPID_SHIFT, %g3
 	and	%g3, JPID_MASK, %g4
-	CPU_STRUCT(%g3)
-	ldx	[%g3 + CPU_ROOT], %g3
-	ldx	[%g3 + CONFIG_CPUS], %g3
-	set	CPU_SIZE, %g5
+
+		/* FIXME: What is this trying to do ?! */
+	ROOT_STRUCT(%g3)
+	ldx	[%g3 + CONFIG_VCPUS], %g3
+	set	VCPU_SIZE, %g5
 	mulx	%g4, %g5, %g5
 	add	%g3, %g5, %g3
-	ldub	[%g3 + CPU_PID], %g3
+	VCPU2STRAND_STRUCT(%g3, %g3)
+	ldub	[%g3 + STRAND_ID], %g3
 
 	HVRET
 	SET_SIZE(_fire_intr_gettarget)
@@ -588,7 +992,8 @@
 	be,pn	%xcc, herr_cpuerror
 	nop
 
-	ldub	[%g4 + CPU_PID], %g3
+	VCPU2STRAND_STRUCT(%g4, %g3)
+	ldub	[%g3 + STRAND_ID], %g3
 	and	%o0, FIRE_DEVINO_MASK, %g2
 
 	HVCALL(_fire_intr_settarget)
@@ -662,28 +1067,46 @@
 	bne,pn	%xcc, herr_inval
 	! Check io_page_list_p alignment
 	! and make sure it is 8 byte aligned
-	andcc	%o4, 3, %g0
-	bnz	herr_badalign
+	btst	SZ_LONG - 1, %o4
+	bnz,pn	%xcc, herr_badalign
 	ldx	[%g1 + FIRE_COOKIE_IOTSB], %g5
-	sethi	%hi(IOTSB_INDEX_MASK), %g3
-	or	%g3, %lo(IOTSB_INDEX_MASK), %g3
+	set	IOTSB_INDEX_MAX, %g3
 	cmp	%o1, %g3
 	bgu,pn	%xcc, herr_inval
+	brlez,pn %o2, herr_inval
 	cmp	%o2, IOMMU_MAP_MAX
 	movgu	%xcc, IOMMU_MAP_MAX, %o2
+
+	! Check to ensure the end of the mapping is still within
+	! range.
+
+	!! %o2 #ttes
+	!! %o1 tte index
+	!! %g3 IOTSB_INDEX_MAX
+
+	add	%o1, %o2, %g2
+	inc	%g3		! make sure last mapping succeeds.
+	cmp	%g2, %g3
+	bgu,pn	%xcc, herr_inval
+	nop
 
 	GUEST_STRUCT(%g2)
 
 	sllx	%o2, IOTTE_SHIFT, %g6
-	RANGE_CHECK(%g2, %o4, %g6, herr_inval, %g7)
-	GUEST_R2P_ADDR(%g2, %o4, %g6, %g7)
+	RA2PA_RANGE_CONV_UNK_SIZE(%g2, %o4, %g6, herr_noraddr, %g7, %g3)
+	mov	%g3, %g6
+	!! %g6	PA
+
 	ldx	[%g1 + FIRE_COOKIE_MMU], %g1
 	mov	1, %g7
 	sllx	%g7, FIRE_IOTTE_V_SHIFT, %g7
 	or	%g7, %o3, %o3
 
+	set	IOMMU_PAGESIZE, %g4
+
 	!! %g1 = Fire MMU Reg Block Base
 	!! %g2 = Guest Struct
+	!! %g4 = IOTSB pagesize
 	!! %g5 = IOTSB base
 	!! %g6 = PA of pagelist
 	!! %o1 = TTE index
@@ -696,37 +1119,94 @@
 
 	!! %g1 = Fire MMU Reg Block Base
 	!! %g2 = Guest
+	!! %g4 = IOTSB pagesize
 	!! %g5 = IOTSB base
 	!! %g6 = PA of pagelist
 	!! %o1 = TTE index
 	!! %o2 = #ttes to map
 	!! %o3 = TTE Attributes + Valid Bit
 
-0:	ldx	[%g6], %o0
-	srlx	%o0, FIRE_PAGESIZE_8K_SHIFT, %o0
+.fire_iommu_map_loop:
+	ldx	[%g6], %g3
+	srlx	%g3, FIRE_PAGESIZE_8K_SHIFT, %o0
 	sllx	%o0, FIRE_PAGESIZE_8K_SHIFT, %o0
 
-	RANGE_CHECK(%g2, %o0, 1, herr_inval, %g7)
-	GUEST_R2P_ADDR(%g2, %o0, %o0, %g7)	! PA -> RA (%o0)
+	cmp	%g3, %o0
+	bne,pn	%xcc, .fire_badalign
+	nop
+
+	RA2PA_RANGE_CONV(%g2, %o0, %g4, .fire_check_ldc_ra, %g7, %g3)
+	ba	.fire_valid_ra
+	mov	%g3, %o0
+
+.fire_check_ldc_ra:
+	LDC_IOMMU_GET_PA(%g2, %o0, %g3, %g7, .fire_noraddr, .fire_noaccess)
+	mov	%g3, %o0
+
+.fire_valid_ra:
+	!! %g1 = Fire MMU Reg Block Base
+	!! %g2 = Guest Struct
+	!! %g4 = IOTSB pagesize
+	!! %g5 = IOTSB base
+	!! %g6 = PA of pagelist
+	!! %o0 = PA of map addr
+	!! %o1 = TTE index
+	!! %o2 = #ttes to map
+	!! %o3 = TTE Attributes + Valid Bit
 	or	%o0, %o3, %o0
 	stx	%o0, [%g5]
 	and	%g5, (1 << 6) - 1, %o0
+
 	stx	%g5, [%g1+0x100]	! IOMMU Flush
-1:
+
 	add	%g5, IOTTE_SIZE, %g5	! *IOTSB++
 	add	%g6, IOTTE_SIZE, %g6	! *PAGELIST++
 	sub	%o2, 1, %o2
-	brgz,pt	%o2, 0b
+	brgz,pt	%o2, .fire_iommu_map_loop
 	add	%o1, 1, %o1
-	! Flush TTEs here XXXX
-	sub	%g5, IOTTE_SIZE, %g5
-0:	brz,pn	%o1, herr_inval
+
+.fire_noaccess:
+	brz,pn	%o1, herr_noaccess
+	mov	0, %o2
+	HCALL_RET(EOK)
+
+.fire_noraddr:
+	brz,pn	%o1, herr_noraddr
+	mov	0, %o2
+	HCALL_RET(EOK)
+
+.fire_badalign:
+	brz,pn	%o1, herr_badalign
 	mov	0, %o2
 	HCALL_RET(EOK)
 	SET_SIZE(fire_iommu_map)
 
 /*
+ * fire_iommu_map_v2
+ *
+ * %g1 Fire Cookie Pointer
+ * arg0 dev config pa (%o0)
+ * arg1 tsbid (%o1)
+ * arg2 #ttes (%o2)
+ * arg3 tte attributes (%o3)
+ * arg4 io_page_list_p (%o4)
+ * --
+ * ret0 status (%o0)
+ * ret1 #ttes mapped (%o1)
+ */
+	ENTRY_NP(fire_iommu_map_v2)
+	set	HVIO_TTE_ATTR_MASK_V2, %g7
+	and	%o3, %g7, %g7
+	cmp	%o3, %g7
+	bne,pn	%xcc, herr_inval
+	and	%o3, HVIO_TTE_ATTR_MASK, %o3
+	ba,a	fire_iommu_map
+	.empty
+	SET_SIZE(fire_iommu_map_v2)
+
+/*
  * fire_iommu_getmap
+ * fire_iommu_getmap_v2
  *
  * %g1 = Fire Cookie Pointer
  * arg0 dev config pa (%o0)
@@ -737,10 +1217,10 @@
  * ret2 ra (%o2)
  */
 	ENTRY_NP(fire_iommu_getmap)
+	ALTENTRY(fire_iommu_getmap_v2)
 	!! %g1 pointer to FIRE_COOKIE
 	ldx	[%g1 + FIRE_COOKIE_IOTSB], %g5
-	sethi	%hi(IOTSB_INDEX_MASK), %g3
-	or	%g3, %lo(IOTSB_INDEX_MASK), %g3
+	set	IOTSB_INDEX_MAX, %g3
 	cmp	%o1, %g3
 	bgu,pn	%xcc, herr_inval
 	sllx	%o1, IOTTE_SHIFT, %g2
@@ -754,7 +1234,10 @@
 	sllx	%g5, (64-JBUS_PA_SHIFT), %g3
 	srlx	%g3, (64-JBUS_PA_SHIFT+FIRE_PAGESIZE_8K_SHIFT), %g3
 	sllx	%g3, FIRE_PAGESIZE_8K_SHIFT, %g3
-	GUEST_P2R_ADDR(%g2, %g3, %o2, %g7)	! PA -> RA (%o2)
+	PA2RA_CONV(%g2, %g3, %o2, %g7, %g4)	! PA -> RA (%o2)
+	brnz	%g4, herr_nomap		/* invalid translation */
+	nop
+
 	and	%g5, HVIO_TTE_ATTR_MASK, %o1
 	movrgez	%g5, 0, %o1	! Clear the attributes if V=0
 	HCALL_RET(EOK)
@@ -774,14 +1257,15 @@
 	ENTRY_NP(fire_iommu_unmap)
 	!! %g1 pointer to FIRE_COOKIE
 	ldx	[%g1 + FIRE_COOKIE_IOTSB], %g5
-	sethi	%hi(IOTSB_INDEX_MASK), %g3
-	or	%g3, %lo(IOTSB_INDEX_MASK), %g3
+	set	IOTSB_INDEX_MAX, %g3
 	cmp	%o1, %g3
 	bgu,pn	%xcc, herr_inval
+	brlez,pn %o2, herr_inval
 	cmp	%o2, IOMMU_MAP_MAX
 	movgu	%xcc, IOMMU_MAP_MAX, %o2
 	brz,pn	%o2, herr_inval
 	add	%o1, %o2, %g2
+	inc	%g3	! make sure last mapping succeeds.
 	cmp	%g2, %g3
 	bgu,pn	%xcc, herr_inval
 	sllx	%o1, IOTTE_SHIFT, %g2
@@ -826,14 +1310,31 @@
 	ENTRY_NP(fire_iommu_getbypass)
 	!! %g1 pointer to FIRE_COOKIE
 
+	! Check to see if bypass is allowed
+	! (We could check the pcie structure, but what better way
+	! than to check and see what Fire itself has enabled after config)
+	!
+	! FIXME: Note S10U3 has a bug in the px driver that will assume
+	! bypass is available if anything other than ENOTSUPP is returned
+	! .. so if the other tests also fail and return EINVAL or EBADRADDR
+	! *before* the bypass enable test then Solaris assumes bypass *is*
+	! supported. For this reason, the not supported test must be first.
+	! - ug !
+
+	ldx	[%g1 + FIRE_COOKIE_PCIE], %g4
+	set	FIRE_DLC_MMU_CTL, %g5
+	ldx	[%g4 + %g5], %g5
+	andcc	%g5, FIRE_MMU_CSR_BE, %g0
+	be,pn	%xcc, herr_notsupported
+	  nop
+
 	andncc	%o2, HVIO_IO_ATTR_MASK, %g0
 	bnz,pn	%xcc, herr_inval
 	.empty
+
 	GUEST_STRUCT(%g2)
 
-	RANGE_CHECK(%g2, %o1, 1, herr_noraddr, %g4)
-	REAL_OFFSET(%g2, %o1, %g3, %g4)
-
+	RA2PA_RANGE_CONV(%g2, %o1, 1, herr_noraddr, %g4, %g3)
 	!! %g3 pa of bypass ra
 
 	setx	FIRE_IOMMU_BYPASS_BASE, %g5, %g4
@@ -856,73 +1357,64 @@
 
 	ENTRY_NP(fire_config_get)
 	!! %g1 pointer to FIRE_COOKIE
+
+	! If leaf is  blacklisted fail access
+	lduw	[%g1 + FIRE_COOKIE_BLACKLIST], %g3
+	brnz,a,pn  %g3, .skip_config_get
+	  mov	1, %o1
+
 	ldx	[%g1 + FIRE_COOKIE_CFG], %g3
-
-	! Check for alignment
-	sub	%o3, 1, %g2
-	andcc	%o2, %g2, %g0
-	bnz,pn	%xcc, herr_badalign
-	nop
-
-	set	PCI_DEV_MASK, %g4
-	set	PCI_CFG_OFFSET_MASK, %g2
-	and	%g4, %o1, %g4
-	cmp	%o1, %g4
-	bne,pn	%xcc, herr_inval
-	and	%g2, %o2, %g2
-	cmp	%g2, %o2
-	bne,pn	%xcc, herr_inval
-	and	%o3, PCI_CFG_SIZE_MASK, %g4
-	cmp	%o3, %g4
-	bne,pn	%xcc, herr_inval
-	mov	1, %g5
-	CPU_STRUCT(%g4)
-	set	CPU_IO_PROT, %g6
-
-	! cpu.io_prot = 1
-	stx	%g5, [%g4 + %g6]
-
-	!! %g1 = Fire cookie
-	!! %g3 = CFG base address
-	!! %g4 = CPU struct
-
-	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
 	PCIDEV2FIREDEV(%o1, %g2)
 	or	%g2, %o2, %g2
 	sub	%g0, 1, %o2
 
-	cmp	%o3, 1
-	beq,a,pn %xcc,1f
-	  ldub	[%g3 + %g2], %o2
-	cmp	%o3, 2
-	beq,a,pn %xcc,1f
-	  lduha	[%g3 + %g2]ASI_P_LE, %o2
-	cmp	%o3, 4
+	!! %g1 = Fire cookie
+	!! %g2 = PCIE config space offset
+	!! %g3 = CFG base address
+	!! %o2 = Error return value
+
+	CHK_FIRE_LINK_STATUS(%g1, %g5, %g6)
+	brz,pn %g5, .skip_config_get
+	  mov	1, %o1		! Error flag
+
+	mov	1, %g5
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+
+	! strand.io_prot = 1
+	stx	%g5, [%g4 + %g6]
+
+	!! %g1 = Fire cookie
+	!! %g2 = PCIE config space offset
+	!! %g3 = CFG base address
+	!! %g4 = STRAND struct
+
+	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
+
+	cmp	%o3, SZ_WORD
 	beq,a,pn %xcc,1f
 	  lduwa	[%g3 + %g2]ASI_P_LE, %o2
+	cmp	%o3, SZ_HWORD
+	beq,a,pn %xcc,1f
+	  lduha	[%g3 + %g2]ASI_P_LE, %o2
+	ldub	[%g3 + %g2], %o2
 
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
-	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error = 0
-	ba	herr_inval
-	stx	%g0, [%g4 + %g6]
 1:
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
 	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
 	ldx	[%g4 + %g6], %o1
-	! cpu.io_error = 0
+	! strand.io_error = 0
 	stx	%g0, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
 
 	ENABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
+.skip_config_get:
 	HCALL_RET(EOK)
 	SET_SIZE(fire_config_get)
 
@@ -936,79 +1428,387 @@
  * arg4 data (%o4)
  * --
  * ret0 status (%o0)
+ * ret1 error_flag (%o1)
  */
 	ENTRY_NP(fire_config_put)
 	!! %g1 pointer to FIRE_COOKIE
 
-	! Check for alignment
-	sub	%o3, 1, %g2
-	andcc	%o2, %g2, %g0
-	bnz,pn	%xcc, herr_badalign
-	nop
+	! If leaf is  blacklisted fail access
+	lduw	[%g1 + FIRE_COOKIE_BLACKLIST], %g3
+	brnz,a,pn  %g3, .skip_config_put
+	  mov	1, %o1
 
 	ldx	[%g1 + FIRE_COOKIE_CFG], %g3
-	set	PCI_DEV_MASK, %g4
-	set	PCI_CFG_OFFSET_MASK, %g2
-	and	%g4, %o1, %g4
-	cmp	%o1, %g4
-	bne,pn	%xcc, herr_inval
-	and	%g2, %o2, %g2
-	cmp	%g2, %o2
-	bne,pn	%xcc, herr_inval
-	and	%o3, PCI_CFG_SIZE_MASK, %g4
-	cmp	%o3, %g4
-	bne,pn	%xcc, herr_inval
-	mov	1, %g5
-	CPU_STRUCT(%g4)
-	set	CPU_IO_PROT, %g6
-
-	! cpu.io_prot = 1
-	stx	%g5, [%g4 + %g6]
-
-	!! %g1 = Fire cookie
-	!! %g3 = CFG base address
-	!! %g4 = CPU struct
-
-	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
 	PCIDEV2FIREDEV(%o1, %g2)
 	or	%g2, %o2, %g2
-	cmp	%o3, 1
-	beq,a,pn %xcc,1f
-	  stb	%o4, [%g3 + %g2]
-	cmp	%o3, 2
-	beq,a,pn %xcc,1f
-	  stha	%o4, [%g3 + %g2]ASI_P_LE
-	cmp	%o3, 4
+
+	!! %g1 = Fire cookie
+	!! %g2 = PCIE config space offset
+	!! %g3 = CFG base address
+
+	CHK_FIRE_LINK_STATUS(%g1, %g5, %g6)
+	brz,pn %g5, .skip_config_put
+	  mov	1, %o1		! Error flag
+
+	mov	1, %g5
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+
+	! strand.io_prot = 1
+	stx	%g5, [%g4 + %g6]
+
+	!! %g1 = Fire cookie
+	!! %g2 = PCIE config space offset
+	!! %g3 = CFG base address
+	!! %g4 = STRAND struct
+
+	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
+
+	cmp	%o3, SZ_WORD
 	beq,a,pn %xcc,1f
 	  stwa	%o4, [%g3 + %g2]ASI_P_LE
-
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
-	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error = 0
-	ba	herr_inval
-	stx	%g0, [%g4 + %g6]
+	cmp	%o3, SZ_HWORD
+	beq,a,pn %xcc,1f
+	  stha	%o4, [%g3 + %g2]ASI_P_LE
+	stb	%o4, [%g3 + %g2]
 1:
+#ifdef FIRE_ERRATUM_20_18
+	ldx	[%g1 + FIRE_COOKIE_EXTRACFGRDADDRPA], %g6
+	brz,pt %g6, 2f
+	nop
+	lduw	[%g6], %g0
+2:
+#endif
 	andn	%g2, PCI_CFG_OFFSET_MASK, %g2
 	ldub	[%g3 + %g2], %g0
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
 	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
 	ldx	[%g4 + %g6], %o1
-	! cpu.io_error = 0
+	! strand.io_error = 0
 	stx	%g0, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
 
 	ENABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
-
+.skip_config_put:
 	HCALL_RET(EOK)
 	SET_SIZE(fire_config_put)
 
+/*
+ * arg0 (%g1) = Fire Cookie
+ * arg2 (%g2) = Offset
+ * arg3 (%g3) = size (1, 2, 4)
+ * --------------------
+ * ret0 = status (1 fail, 0 pass)
+ * ret1 = data
+ */
+
+	ENTRY_NP(hv_config_get)
+
+	!! %g1 =  fire cookie (pointer)
+	!! %g2 = offset
+	!! %g3 = size (1 byte, 2 bytes, 4 bytes)
+
+	mov	1, %g5
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+
+	!! %g4 = Strand struct
+
+	! strand.io_prot = 1
+	stx	%g5, [%g4 + %g6]
+
+	DISABLE_PCIE_RWUC_ERRORS(%g1, %g4, %g5, %g6)
+
+
+	ldx	[%g1 + FIRE_COOKIE_CFG], %g4
+	cmp	%g3, 1
+	beq,a,pn %xcc,1f
+	  ldub	[%g4 + %g2], %g3
+	cmp	%g3, 2
+	beq,a,pn %xcc,1f
+	  lduha	[%g4 + %g2]ASI_P_LE, %g3
+	lduwa	[%g4 + %g2]ASI_P_LE, %g3
+1:
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
+	stx	%g0, [%g4 + %g6]
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
+	ldx	[%g4 + %g6], %g5
+	! strand.io_error = 0
+	stx	%g0, [%g4 + %g6]
+
+	ENABLE_PCIE_RWUC_ERRORS(%g1, %g4, %g2, %g6)
+	HVRET
+	SET_SIZE(hv_config_get)
+
+/*
+ * bool_t pci_config_get(uint64_t firep, uint64_t offset, int size,
+ *		uint64_t *data)
+ */
+        ENTRY(pci_config_get)
+
+	STRAND_PUSH(%g2, %g6, %g7)
+	STRAND_PUSH(%g3, %g6, %g7)
+	STRAND_PUSH(%g4, %g6, %g7)
+
+        mov     %o0, %g1
+        mov     %o1, %g2
+	mov	%o2, %g3
+
+	! %g1 - firep
+	! %g2 - Address
+	! %g3 - size ( 1, 2, 4)
+
+	HVCALL(hv_config_get)
+
+	stx	%g3, [%o3]
+	movrnz	%g5, 0, %o0
+	movrz	%g5, 1, %o0
+
+        STRAND_POP(%g4, %g6)
+        STRAND_POP(%g3, %g6)
+        STRAND_POP(%g2, %g6)
+
+        retl
+          nop
+	SET_SIZE(pci_config_get)
+
+
+
+/*
+ * arg0 (%o0) = Fire Cookie
+ * arg2 (%o1) = Offset
+ * arg3 (%o2) = size (1, 2, 4)
+ * arg4 (%o3) = data
+ * --------------------
+ * ret0 (%o0)= status (1 fail, 0 pass)
+ * %g1, %g5, %g6, %g7 Clobbered.
+ *
+ * bool_t pci_config_put(uint64_t firep, uint64_t offset, int size,
+ *	uint64_t data)
+ */
+
+	ENTRY_NP(pci_config_put)
+	!! %o0 = fire cookie (pointer)
+	!! %o1 = offset
+	!! %o2 = size (1 byte, 2 bytes, 4 bytes)
+	!! %o3 = Data
+	ldx	[%o0 + FIRE_COOKIE_CFG], %o4
+	add	%o1, %o4, %o1
+
+	mov	1, %g5
+	STRAND_STRUCT(%g6)
+	set	STRAND_IO_PROT, %g7
+
+	!! %g6 = Strand struct
+
+	! strand.io_prot = 1
+	stx	%g5, [%g6 + %g7]
+
+	DISABLE_PCIE_RWUC_ERRORS(%o0, %g5, %g7, %g1)
+
+	cmp	%o2, 1
+	beq,a,pn %xcc,1f
+	  stb	%o3, [%o1]
+	cmp	%o2, 2
+	beq,a,pn %xcc,1f
+	  stha	%o3, [%o1]ASI_P_LE
+	stwa	%o3, [%o1]ASI_P_LE
+1:
+
+#ifdef FIRE_ERRATUM_20_18
+	ldx	[%o0 + FIRE_COOKIE_EXTRACFGRDADDRPA], %g5
+	brz,pt %g5, 2f
+	nop
+	lduw	[%g5], %g0
+2:
+#endif
+	!! %g6 = Strand struct
+	andn	%o1, PCI_CFG_OFFSET_MASK, %g1
+	ldub	[%g1], %g0
+
+	set	STRAND_IO_PROT, %g7
+	! strand.io_prot = 0
+	stx	%g0, [%g6 + %g7]
+	set	STRAND_IO_ERROR, %g7
+	! strand.io_error
+	ldx	[%g6 + %g7], %o1
+	! strand.io_error = 0
+	stx	%g0, [%g6 + %g7]
+
+	ENABLE_PCIE_RWUC_ERRORS(%o0, %g5, %g7, %g1)
+
+	movrnz	%o1, 0, %o0
+	movrz	%o1, 1, %o0
+
+	retl
+	  nop
+	SET_SIZE(pci_config_put)
+
+
+
+/*
+ * arg0 (%g1) = Fire Cookie
+ * arg2 (%g2) = Offset
+ * arg3 (%g3) = size (1, 2, 4)
+ * --------------------
+ * ret0 = status (1 fail, 0 pass)
+ * ret1 = data
+ */
+
+	ENTRY_NP(hv_io_peek)
+
+	!! %g1 =  fire cookie (pointer)
+	!! %g2 =  address
+	!! %g3 = size (1 byte, 2 bytes, 4 bytes)
+
+	mov	1, %g5
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+
+	!! %g4 = Strand struct
+
+	! strand.io_prot = 1
+	stx	%g5, [%g4 + %g6]
+
+	DISABLE_PCIE_RWUC_ERRORS(%g1, %g4, %g5, %g6)
+
+
+	ldx	[%g1 + FIRE_COOKIE_CFG], %g4
+	cmp	%g3, 1
+	beq,a,pn %xcc,1f
+	  ldub	[%g2], %g3
+	cmp	%g3, 2
+	beq,a,pn %xcc,1f
+	  lduha	[%g2]ASI_P_LE, %g3
+	lduwa	[%g2]ASI_P_LE, %g3
+1:
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
+	stx	%g0, [%g4 + %g6]
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
+	ldx	[%g4 + %g6], %g5
+	! strand.io_error = 0
+	stx	%g0, [%g4 + %g6]
+
+	ENABLE_PCIE_RWUC_ERRORS(%g1, %g4, %g2, %g6)
+	HVRET
+	SET_SIZE(hv_io_peek)
+
+/*
+ * bool_t pci_io_peek(uint64_t firep, uint64_t address, int size,
+ *		uint64_t *data)
+ */
+        ENTRY(pci_io_peek)
+
+	STRAND_PUSH(%g2, %g6, %g7)
+	STRAND_PUSH(%g3, %g6, %g7)
+	STRAND_PUSH(%g4, %g6, %g7)
+
+        mov     %o0, %g1
+        mov     %o1, %g2
+	mov	%o2, %g3
+
+	! %g1 - firep
+	! %g2 - Address
+	! %g3 - size ( 1, 2, 4)
+
+	HVCALL(hv_io_peek)
+
+	stx	%g3, [%o3]
+	movrnz	%g5, 0, %o0
+	movrz	%g5, 1, %o0
+
+        STRAND_POP(%g4, %g6)
+        STRAND_POP(%g3, %g6)
+        STRAND_POP(%g2, %g6)
+
+        retl
+          nop
+	SET_SIZE(pci_io_peek)
+
+
+
+/*
+ * arg0 (%o0) = Fire Cookie
+ * arg1 (%o1) = Offset
+ * arg2 (%o2) = size (1, 2, 4)
+ * arg3 (%o3) = data
+ * arg4 (%o4) = PCI device
+ * --------------------
+ * ret0 (%o0)= status (1 fail, 0 pass)
+ * %g1, %g5, %g6, %g7 Clobbered.
+ *
+ * bool_t pci_io_put(uint64_t firep, uint64_t address, int size,
+ *	uint64_t data)
+ */
+
+	ENTRY_NP(pci_io_poke)
+	!! %o0 = fire cookie (pointer)
+	!! %o1 = Address
+	!! %o2 = size (1 byte, 2 bytes, 4 bytes)
+	!! %o3 = Data
+	!! %o4 = Config space offset for device
+
+	STRAND_STRUCT(%g6)
+
+	!! %g6 = Strand struct
+
+	! strand.io_prot = 1
+	mov	1, %g5
+	set	STRAND_IO_PROT, %g7
+	stx	%g5, [%g6 + %g7]
+
+	DISABLE_PCIE_RWUC_ERRORS(%o0, %g5, %g7, %g1)
+
+	cmp	%o2, 1
+	beq,a,pn %xcc,1f
+	  stb	%o3, [%o1]
+	cmp	%o2, 2
+	beq,a,pn %xcc,1f
+	  stha	%o3, [%o1]ASI_P_LE
+	stwa	%o3, [%o1]ASI_P_LE
+1:
+
+#ifdef FIRE_ERRATUM_20_18
+	ldx	[%o0 + FIRE_COOKIE_EXTRACFGRDADDRPA], %g5
+	brz,pt %g5, 2f
+	nop
+	lduw	[%g5], %g0
+2:
+#endif
+	! Read from PCI config space as error barrier
+	ldx	[%o0 + FIRE_COOKIE_CFG], %g5
+	ldub	[%g5 + %o4], %g0
+
+	!! %g6 = Strand struct
+
+	set	STRAND_IO_PROT, %g7
+	! strand.io_prot = 0
+	stx	%g0, [%g6 + %g7]
+	set	STRAND_IO_ERROR, %g7
+	! strand.io_error
+	ldx	[%g6 + %g7], %o1
+	! strand.io_error = 0
+	stx	%g0, [%g6 + %g7]
+
+	ENABLE_PCIE_RWUC_ERRORS(%o0, %g5, %g7, %g1)
+
+	movrnz	%o1, 0, %o0
+	movrz	%o1, 1, %o0
+
+	retl
+	  nop
+	SET_SIZE(pci_io_poke)
 
 /*
  * fire_dma_sync
@@ -1017,25 +1817,15 @@
  * arg0 devhandle (%o0)
  * arg1 r_addr (%o1)
  * arg2 size (%o2)
- * arg3 direction (%o3) (1: for device 2: for cpu)
+ * arg3 direction (%o3) (one or both of 1: for device 2: for cpu)
  * --
  * ret0 status (%o0)
  * ret1 #bytes synced (%o1)
  */
 	ENTRY_NP(fire_dma_sync)
-	cmp	%o3, HVIO_DMA_SYNC_CPU
-	bgu,pn %xcc, herr_inval
-	nop
-	cmp	%o3, HVIO_DMA_SYNC_DEVICE
-	bl,pn %xcc, herr_inval
-	nop
-	brz,pn	%o2, herr_inval
-	nop
-
 	GUEST_STRUCT(%g2)
-	RANGE_CHECK(%g2, %o1, %o2, herr_noraddr, %g3)
+	RA2PA_RANGE_CONV_UNK_SIZE(%g2, %o1, %o2, herr_noraddr, %g4, %g3)
 	mov	%o2, %o1
-	! XXX Do we need to flush anything XXX
 	HCALL_RET(EOK);
 	SET_SIZE(fire_dma_sync)
 
@@ -1052,11 +1842,9 @@
  * ret2 data (%o2)
  */
 	ENTRY_NP(fire_io_peek)
-	! Check for alignment
-	sub	%o2, 1, %g2
-	andcc	%o1, %g2, %g0
-	bnz,pn	%xcc, herr_badalign
+	!! %g1 = Fire Cookie
 	GUEST_STRUCT(%g2)
+
 	!! %g2 = Guestp
 	!! %o1 = ra
 	!! %o2 = size
@@ -1064,49 +1852,47 @@
 	RANGE_CHECK_IO(%g2, %o1, %o2, .fire_io_peek_found, herr_noraddr,
 	    %g4, %g6)
 .fire_io_peek_found:
+
+	CHK_FIRE_LINK_STATUS(%g1, %g5, %g6)
+	brz,a,pn %g5, .skip_io_peek
+	  mov	1, %o1		! Error flag
+
 	mov	1, %g5
-	CPU_STRUCT(%g4)
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 1
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 1
 	stx	%g5, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
-	!! %g4 = CPU struct
+	!! %g4 = STRAND struct
 
 	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
-	cmp	%o2, 1
-	beq,a,pn %xcc,1f
-	  ldub	[%o1], %o2
-	cmp	%o2, 2
-	beq,a,pn %xcc,1f
-	  lduha	[%o1]ASI_P_LE, %o2
-	cmp	%o2, 4
-	beq,a,pn %xcc,1f
-	  lduwa	[%o1]ASI_P_LE, %o2
-	cmp	%o2, 8
+	cmp	%o2, SZ_LONG
 	beq,a,pn %xcc,1f
 	  ldxa	[%o1]ASI_P_LE, %o2
+	cmp	%o2, SZ_WORD
+	beq,a,pn %xcc,1f
+	  lduwa	[%o1]ASI_P_LE, %o2
+	cmp	%o2, SZ_HWORD
+	beq,a,pn %xcc,1f
+	  lduha	[%o1]ASI_P_LE, %o2
+	ldub	[%o1], %o2
 
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
+1:	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
 	stx	%g0, [%g4 + %g6]
-
-	HCALL_RET(EINVAL)
-
-1:	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
-	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
 	ldx	[%g4 + %g6], %o1
-	! cpu.io_error = 0
+	! strand.io_error = 0
 	stx	%g0, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
 
 	ENABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
+.skip_io_peek:
 	HCALL_RET(EOK)
 	SET_SIZE(fire_io_peek)
 
@@ -1124,23 +1910,11 @@
  * ret1 error? (%o1)
  */
 	ENTRY_NP(fire_io_poke)
-	! Check size
-	cmp	%o2, 8
-	bgu,pn	%xcc, herr_inval
-	sub	%o2, 1, %g5
-	and	%o2, %g5, %g2
-	brnz,pn	%g2, herr_inval
-	! Check r_addr alignment
-	and	%o1, %g5, %g2
-	brnz,pn	%g2, herr_badalign
-	nop
-
+	!! %g1 = Fire Cookie
 	ldx	[%g1 + FIRE_COOKIE_CFG], %g3
-	set	PCI_DEV_MASK, %g4
-	and	%g4, %o4, %g4
-	cmp	%o4, %g4
-	bne,pn	%xcc, herr_inval
 	GUEST_STRUCT(%g2)
+
+	!! %g1 = Fire Cookie
 	!! %g2 = Guestp
 	!! %o1 = ra
 	!! %o2 = size
@@ -1148,12 +1922,17 @@
 	RANGE_CHECK_IO(%g2, %o1, %o2, .fire_io_poke_found, herr_noraddr,
 	    %g4, %g6)
 .fire_io_poke_found:
+
+	CHK_FIRE_LINK_STATUS(%g1, %g5, %g6)
+	brz,a,pn %g5, .skip_io_poke
+	  mov	1, %o1		! Error flag
+
 	PCIDEV2FIREDEV(%o4, %g2)
 	mov	1, %g5
-	CPU_STRUCT(%g4)
-	set	CPU_IO_PROT, %g6
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g6
 
-	! cpu.io_prot = 1
+	! strand.io_prot = 1
 	stx	%g5, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
@@ -1163,33 +1942,34 @@
 
 	DISABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
-	cmp	%o2, 1
+	cmp	%o2, SZ_LONG
 	beq,a,pn %xcc,1f
-	  stb	%o3, [%o1]
-	cmp	%o2, 2
-	beq,a,pn %xcc,1f
-	  stha	%o3, [%o1]ASI_P_LE
-	cmp	%o2, 4
+	  stxa	%o3, [%o1]ASI_P_LE
+	cmp	%o2, SZ_WORD
 	beq,a,pn %xcc,1f
 	  stwa	%o3, [%o1]ASI_P_LE
-	stxa	%o3, [%o1]ASI_P_LE
+	cmp	%o2, SZ_HWORD
+	beq,a,pn %xcc,1f
+	  stha	%o3, [%o1]ASI_P_LE
+	stb	%o3, [%o1]
 1:
 	! Read from PCI config space
 	ldub	[%g3 + %g2], %g0
 
-	set	CPU_IO_PROT, %g6
-	! cpu.io_prot = 0
+	set	STRAND_IO_PROT, %g6
+	! strand.io_prot = 0
 	stx	%g0, [%g4 + %g6]
-	set	CPU_IO_ERROR, %g6
-	! cpu.io_error
+	set	STRAND_IO_ERROR, %g6
+	! strand.io_error
 	ldx	[%g4 + %g6], %o1
-	! cpu.io_error = 0
+	! strand.io_error = 0
 	stx	%g0, [%g4 + %g6]
 
 	!! %g1 = Fire cookie
 
 	ENABLE_PCIE_RWUC_ERRORS(%g1, %g5, %g6, %g7)
 
+.skip_io_poke:
 	HCALL_RET(EOK)
 	SET_SIZE(fire_io_poke)
 
@@ -1231,11 +2011,11 @@
 	 * Verify RA range/alignment
 	 */
 	GUEST_STRUCT(%g2)
-	RANGE_CHECK(%g2, %o2, %g0, herr_noraddr, %g7)
 	andcc	%o2, 3, %g0
 	bnz	%xcc, herr_badalign
 	.empty
-	GUEST_R2P_ADDR(%g2, %o2, %g6, %g7)
+	RA2PA_RANGE_CONV(%g2, %o2, %g0, herr_noraddr, %g7, %g6)
+	!! %g6 	paddr
 
 	MSIEQNUM2MSIEQ(%g1, %o1, %g4, %g3, %g2)
 	ldx	[%g1 + FIRE_COOKIE_EQSTATE], %g2
@@ -1275,7 +2055,10 @@
 	movrz	%g5, %g0, %o2
 	brz,pn	%g5, 1f
 	GUEST_STRUCT(%g2)
-	GUEST_P2R_ADDR(%g2, %g5, %o1, %g6)	! PA -> RA (%o1)
+	PA2RA_CONV(%g2, %g5, %o1, %g6, %g3)	! PA -> RA (%o1)
+	brnz	%g3, herr_inval
+	nop
+
 1:	HCALL_RET(EOK)
 	SET_SIZE(fire_msiq_info)
 
@@ -1363,10 +2146,22 @@
 	REGNO2OFFSET(%o1, %g4)
 	cmp	%o1, FIRE_NEQS
 	bgeu,pn	%xcc, herr_inval
-	ldx	[%g1 + FIRE_COOKIE_EQCTLCLR], %g2
-	setx	(1 << FIRE_EQCCR_COVERR)|(1 << FIRE_EQCCR_E2I_SHIFT), %g5, %g3
-	movrz	%o2, %g0, %g3
-	stx	%g3, [%g2 + %g4]
+	.empty
+	/*
+	 * To change state from error to idle, we set bits 57 and 47 in the
+	 * Event Queue Control Clear Register (CCR)
+	 *
+	 * To change state from idle to error, we set bits 44 and 57 in the
+	 * Event Queue Control Set Register (CSR)
+	 */
+	mov	FIRE_COOKIE_EQCTLCLR, %g6		! EQ CCR
+	movrnz	%o2, FIRE_COOKIE_EQCTLSET, %g6		! EQ CSR
+	ldx     [%g1 + %g6], %g2
+	setx    (1 << FIRE_EQCCR_COVERR)|(1 << FIRE_EQCCR_E2I_SHIFT), %g5, %g3    ! set idle
+        setx    (1 << FIRE_EQCSR_ENOVERR)|(1 << FIRE_EQCSR_EN_SHIFT), %g5, %g6    ! set error
+        movrnz	%o2, %g6, %g3
+        stx     %g3, [%g2 + %g4]
+
 	HCALL_RET(EOK)
 	SET_SIZE(fire_msiq_setstate)
 
@@ -1403,10 +2198,10 @@
 	ENTRY_NP(fire_msiq_sethead)
 	cmp	%o1, FIRE_NEQS
 	bgeu,pn	%xcc, herr_inval
-	REGNO2OFFSET(%o1, %g6)
 	set	FIRE_EQSIZE, %g2
-	cmp	%o2,%g2
-	bgu,pn	%xcc, herr_inval
+	cmp	%o2, %g2
+	bgeu,pn	%xcc, herr_inval
+	REGNO2OFFSET(%o1, %g6)
 	ldx	[%g1 + FIRE_COOKIE_EQHEAD], %g2
 	ldx	[%g2 + %g6], %g3
 	mov	%o2, %g6
@@ -1480,7 +2275,7 @@
 	REGNO2OFFSET(%o1, %g4)
 	ldx	[%g1 + FIRE_COOKIE_MSIMAP], %g2
 	ldx	[%g2 + %g4], %g5
-	movge	%g5, HVIO_MSI_INVALID, %o1
+	mov	HVIO_MSI_INVALID, %o1
 	movrlz	%g5, HVIO_MSI_VALID, %o1
 	HCALL_RET(EOK)
 	SET_SIZE(fire_msi_getvalid)
@@ -1756,10 +2551,12 @@
  * %g3 = Mondo DATA1
  */
 	ENTRY_NP(fire_msi_mondo_receive)
-	mov	%g1, %g3
+	STRAND_PUSH(%g1, %g3, %g4)
+	STRAND_PUSH(%g2, %g3, %g4)
 	ba	insert_device_mondo_r
 	rd	%pc, %g7
-	mov	%g3, %g1
+	STRAND_POP(%g2, %g3)
+	STRAND_POP(%g1, %g3)
 
 	and	%g2, FIRE_DEVINO_MASK, %g2
 	sub	%g2, FIRE_EQ2INO(0), %g2
@@ -1876,28 +2673,28 @@
 	SET_SIZE(fire_msi_mondo_receive)
 
 	DATA_GLOBAL(fire_perf_regs_table)
-	!! Registers 0 - 2
+	! Registers 0 - 2
 	.xword	FIRE_JBC_PERF_CNTRL, 0x000000000000ffff	! Read Offset & Mask
 	.xword	FIRE_JBC_PERF_CNTRL, 0x000000000000ffff	! Write Offset & Mask
 	.xword	FIRE_JBC_PERF_CNT0, 0xffffffffffffffff
 	.xword	FIRE_JBC_PERF_CNT0, 0xffffffffffffffff
 	.xword	FIRE_JBC_PERF_CNT1, 0xffffffffffffffff
 	.xword	FIRE_JBC_PERF_CNT1, 0xffffffffffffffff
-	!! Registers 3 - 5
+	! Registers 3 - 5
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNTRL, 0x000000000000ffff
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNTRL, 0x000000000000ffff
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNT0, 0xffffffffffffffff
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNT0, 0xffffffffffffffff
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNT1, 0xffffffffffffffff
 	.xword	FIRE_DLC_IMU_ICS_IMU_PERF_CNT1, 0xffffffffffffffff
-	!! Registers 6 - 8
+	! Registers 6 - 8
 	.xword	FIRE_DLC_MMU_PRFC, 0x000000000000ffff
 	.xword	FIRE_DLC_MMU_PRFC, 0x000000000000ffff
 	.xword	FIRE_DLC_MMU_PRF0, 0xffffffffffffffff
 	.xword	FIRE_DLC_MMU_PRF0, 0xffffffffffffffff
 	.xword	FIRE_DLC_MMU_PRF1, 0xffffffffffffffff
 	.xword	FIRE_DLC_MMU_PRF1, 0xffffffffffffffff
-	!! Registers 9 - 12
+	! Registers 9 - 12
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRFC, 0x000000000003ffff
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRFC, 0x000000000003ffff
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRF0, 0xffffffffffffffff
@@ -1906,7 +2703,7 @@
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRF1, 0xffffffffffffffff
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRF2, 0x00000000ffffffff
 	.xword	FIRE_PLC_TLU_CTB_TLR_TLU_PRF2, 0x00000000ffffffff
-	!! Registers 13 - 15
+	! Registers 13 - 15
 	.xword	FIRE_PLC_TLU_CTB_LPR_PCIE_LPU_LINK_PERF_CNTR1_SEL, 0xffffffff
 	.xword	FIRE_PLC_TLU_CTB_LPR_PCIE_LPU_LINK_PERF_CNTR1_SEL, 0xffffffff
 	.xword	FIRE_PLC_TLU_CTB_LPR_PCIE_LPU_LINK_PERF_CNTR1, 0xffffffff
@@ -1919,10 +2716,10 @@
  * Each register entry is 0x20 bytes
  */
 #define	FIRE_REGID2OFFSET(id, offset)	sllx	id, 5, offset
-#define FIRE_PERF_READ_ADR	0
-#define FIRE_PERF_READ_MASK	8
-#define FIRE_PERF_WRITE_ADR	0x10
-#define FIRE_PERF_WRITE_MASK	0x18
+#define	FIRE_PERF_READ_ADR	0
+#define	FIRE_PERF_READ_MASK	8
+#define	FIRE_PERF_WRITE_ADR	0x10
+#define	FIRE_PERF_WRITE_MASK	0x18
 
 /*
  * fire_get_perf_reg
@@ -1936,7 +2733,7 @@
  */
 	ENTRY_NP(fire_get_perf_reg)
 	cmp	%o1, FIRE_NPERFREGS
-	bgu,pn	%xcc, herr_inval
+	bgeu,pn	%xcc, herr_inval
 	mov	1, %g3
 	sllx	%g3, %o1, %g3
 	ldx	[%g1 + FIRE_COOKIE_PERFREGS], %g2
@@ -1983,7 +2780,7 @@
  */
 	ENTRY_NP(fire_set_perf_reg)
 	cmp	%o1, FIRE_NPERFREGS
-	bgu,pn	%xcc, herr_inval
+	bgeu,pn	%xcc, herr_inval
 	mov	1, %g3
 	sllx	%g3, %o1, %g3
 	ldx	[%g1 + FIRE_COOKIE_PERFREGS], %g2
@@ -2043,7 +2840,7 @@
 	! %g3 - this cpu
 	HVCALL(_fire_intr_redistribution)
 
-	mov	FIRE_B_AID, %g1 
+	mov	FIRE_B_AID, %g1
 	GUEST_STRUCT(%g4)
 	DEVINST2INDEX(%g4, %g1, %g1, %g5, .fire_intr_redis_fail)
 	DEVINST2COOKIE(%g4, %g1, %g1, %g5, .fire_intr_redis_fail)
@@ -2112,7 +2909,7 @@
 
 .fire_intr_redis_continue:
 	deccc	%g2
-	bgeu,pt	 %xcc, ._fire_intr_redis_loop 
+	bgeu,pt	%xcc, ._fire_intr_redis_loop
 	nop
 
 .fire_redis_done:
@@ -2120,6 +2917,262 @@
 	CPU_POP(%g7, %g4, %g5, %g6)
 	HVRET
 	SET_SIZE(_fire_intr_redistribution)
+
+
+/*
+ * FIRE_MSIQ_UNCONFIGURE
+ *
+ * fire     - (preserved) Fire Cookie Pointer
+ * msieq_id - (preserved) MSI EQ id
+ *
+ */
+#define	FIRE_MSIQ_UNCONFIGURE(fire, msieq_id, scr1, scr2, scr3, scr4)	\
+	.pushlocals							;\
+	cmp	msieq_id, FIRE_NEQS					;\
+	bgeu,pn	%xcc, 0f						;\
+	MSIEQNUM2MSIEQ(fire, msieq_id, scr3, scr2, scr1)		;\
+	REGNO2OFFSET(msieq_id, scr4)					;\
+	ldx	[fire + FIRE_COOKIE_EQHEAD], scr1			;\
+	ldx	[fire + FIRE_COOKIE_EQTAIL], scr2			;\
+	stx	%g0, [scr1 + scr4]					;\
+	stx	%g0, [scr2 + scr4]					;\
+	stx	%g0, [scr3 + FIRE_MSIEQ_GUEST]				;\
+0:									;\
+	.poplocals
+
+
+/*
+ * FIRE_MSIQ_INVALIDATE
+ *
+ * fire     - (preserved) Fire Cookie Pointer
+ * msieq_id - (preserved) MSI EQ id
+ *
+ */
+#define	FIRE_MSIQ_INVALIDATE(fire, msieq_id, scr1, scr2, scr3, scr4)	\
+	.pushlocals							;\
+	cmp	msieq_id, FIRE_NEQS					;\
+	bgeu,pn	%xcc, 0f						;\
+	  nop								;\
+	ldx	[fire + FIRE_COOKIE_EQCTLCLR], scr1			;\
+		/* 44=disable, 47=e2i 57=coverr */			;\
+	setx	(1<<44)|(1<<47)|(1<<57), scr3, scr2			;\
+	REGNO2OFFSET(msieq_id, scr4)					;\
+	stx	scr2, [scr1 + scr4]					;\
+0:									;\
+	.poplocals
+
+
+/*
+ * FIRE_MSI_INVALIDATE - Invalidate the MSI mappings and then clear
+ * the MSI status (mark as "idle")
+ *
+ * fire    - (preserved) Fire Cookie Pointer
+ * msi_num - (preserved) MSI number (%o1)
+ *
+ */
+#define	FIRE_MSI_INVALIDATE(fire, msi_num, scr1, scr2, scr3)	\
+	.pushlocals						;\
+	cmp	msi_num, FIRE_MSI_MASK				;\
+	bgu,pn	%xcc, 0f					;\
+	REGNO2OFFSET(msi_num, scr2)				;\
+	ldx	[fire + FIRE_COOKIE_MSIMAP], scr1		;\
+	ldx	[scr1 + scr2], scr3				;\
+		/* clear both bits 62 and 63 in the map reg */	;\
+		/* valid and ok to write (pending MSI) bit */	;\
+	sllx	scr3, 2, scr3					;\
+	srlx	scr3, 2, scr3					;\
+	stx	scr3, [scr1 + scr2]				;\
+	mov	1, scr3		/* now mark status as "idle" */	;\
+	sllx	scr3, FIRE_MSIMR_EQWR_N_SHIFT, scr3		;\
+	ldx	[fire + FIRE_COOKIE_MSICLR], scr1		;\
+	stx	scr3, [scr1 + scr2]				;\
+0:								;\
+	.poplocals
+
+
+/*
+ * FIRE_MSI_MSG_INVALIDATE
+ *
+ * fire       - (preserved) Fire Cookie Pointer
+ * msg_offset - (preserved) message offset such as FIRE_CORR_OFF,
+ *                          FIRE_NONFATAL_OFF, etc. (reg or contant)
+ *
+ */
+#define	FIRE_MSI_MSG_INVALIDATE(fire, msg_offset, scr1, scr2)	\
+	ldx	[fire + FIRE_COOKIE_MSGMAP], scr1		;\
+	ldx	[scr1 + msg_offset], scr2			;\
+	sllx	scr2, 1, scr2					;\
+	srlx	scr2, 1, scr2					;\
+	stx	scr2, [scr1 + msg_offset]
+
+
+#define	FIRE_INVALIDATE_INTX(fire, intx_off, scr1, scr2)	\
+	ldx	[fire + FIRE_COOKIE_PCIE], scr1			;\
+	set	intx_off, scr2					;\
+	add	scr1, scr2, scr1				;\
+	set	1, scr2						;\
+	stx	scr2, [scr1]
+
+
+
+/*
+ * fire_leaf_soft_reset
+ *
+ * %g1 - Fire cookie			(preserved)
+ * %g2 - root complex (0=A, 1=B)
+ * %g7 - return address
+ *
+ * clobbers %g2-%g6
+ */
+	ENTRY_NP(fire_leaf_soft_reset)
+
+	!
+	! Put STRAND in protected mode
+	!
+	STRAND_STRUCT(%g4)
+	mov	1, %g5
+	set	STRAND_IO_PROT, %g6
+	stx	%g5, [%g4 + %g6]
+	membar	#Sync
+
+	!
+	! Disable errors
+	!
+	DISABLE_PCIE_RWUC_ERRORS(%g1, %g4, %g5, %g6)
+	membar	#Sync
+
+	!! %g1 fire struct
+	!! %g2 PCI bus (0=A, 1=B)
+
+	!
+	! Destroy the iommu mappings
+	!
+	FIRE_IOMMU_FLUSH(%g1, %g2, %g4, %g5, %g6)
+	membar	#Sync
+
+	!
+	! Invalidate any pending legacy (level) interrupts
+	! that were previously signalled from switches we just reset
+	!
+
+	FIRE_INVALIDATE_INTX(%g1, FIRE_DLC_IMU_RDS_INTX_INT_A_INT_CLR_REG,
+		%g2, %g4)
+	FIRE_INVALIDATE_INTX(%g1, FIRE_DLC_IMU_RDS_INTX_INT_B_INT_CLR_REG,
+		%g2, %g4)
+	FIRE_INVALIDATE_INTX(%g1, FIRE_DLC_IMU_RDS_INTX_INT_C_INT_CLR_REG,
+		%g2, %g4)
+	FIRE_INVALIDATE_INTX(%g1, FIRE_DLC_IMU_RDS_INTX_INT_D_INT_CLR_REG,
+		%g2, %g4)
+
+	!
+	! invalidate all MSIs
+	!
+	set	FIRE_MAX_MSIS - 1, %g2
+1:	FIRE_MSI_INVALIDATE(%g1, %g2, %g6, %g4, %g5)
+	brgz,pt	%g2, 1b
+	  dec	%g2
+	membar	#Sync
+
+	!
+	! invalidate all MSI Messages
+	!
+	FIRE_MSI_MSG_INVALIDATE(%g1, FIRE_CORR_OFF, %g5, %g4)
+	FIRE_MSI_MSG_INVALIDATE(%g1, FIRE_NONFATAL_OFF, %g5, %g4)
+	FIRE_MSI_MSG_INVALIDATE(%g1, FIRE_FATAL_OFF, %g5, %g4)
+	FIRE_MSI_MSG_INVALIDATE(%g1, FIRE_PME_OFF, %g5, %g4)
+	FIRE_MSI_MSG_INVALIDATE(%g1, FIRE_PME_ACK_OFF, %g5, %g4)
+
+	!
+	! invalidate all interrupts
+	!
+
+	! invalidate inos 63 and 62, special case ones not set with
+	! _fire_intr_setvalid
+	ldx	[%g1 + FIRE_COOKIE_VIRTUAL_INTMAP], %g2
+	add	%g2, PCIE_ERR_MONDO_OFFSET, %g2
+	mov	0, %g3			! devid 0
+	add	%g3, %g2, %g2
+	stb	%g0, [%g1 + %g2]
+
+	ldx	[%g1 + FIRE_COOKIE_VIRTUAL_INTMAP], %g2
+	add	%g2, PCIE_ERR_MONDO_OFFSET, %g2
+	mov	1, %g3			! devid 1
+	add	%g3, %g2, %g2
+	stb	%g0, [%g1 + %g2]
+
+	ldx     [%g1 + FIRE_COOKIE_VIRTUAL_INTMAP], %g2
+	add	%g2, JBC_ERR_MONDO_OFFSET, %g2
+	sth	%g0, [%g1 + %g2]
+
+	CPU_PUSH(%g7, %g4, %g5, %g6)	! _fire_intr_setvalid clobbers all regs
+	! Don't invalidate inos 62 & 63 in this loop, 62 and 63 are done above
+	set	NFIREDEVINO - 3, %g2
+	clr	%g3
+1:	HVCALL(_fire_intr_setvalid)	! clobbers %g4-%g6
+	brgz,pt	%g2, 1b
+	  dec	%g2
+	membar	#Sync
+	CPU_POP(%g7, %g4, %g5, %g6)	! restore clobbered value
+
+	!
+	! invalidate and unconfigure all MSI EQs
+	!
+	set	FIRE_NEQS - 1, %g2
+1:	FIRE_MSIQ_INVALIDATE(%g1, %g2, %g3, %g4, %g5, %g6)
+	FIRE_MSIQ_UNCONFIGURE(%g1, %g2, %g3, %g4, %g5, %g6)
+	brgz,pt	%g2, 1b
+	  dec	%g2
+	membar	#Sync
+
+	!
+	! re-enable errors
+	!
+	ENABLE_PCIE_RWUC_ERRORS(%g1, %g2, %g4, %g5)
+	membar	#Sync
+
+	!
+	! Bring STRAND out of protected mode
+	!
+	STRAND_STRUCT(%g4)
+	set	STRAND_IO_PROT, %g2
+	stx	%g0, [%g4 + %g2]
+	set	STRAND_IO_ERROR, %g2
+	stx	%g0, [%g4 + %g2]
+
+	HVRET
+	SET_SIZE(fire_leaf_soft_reset)
+
+
+        /*
+         * Wrapper around fire_leaf_soft_reset so it can be called from C
+         * SPARC ABI requries only that g2,g3,g4 are preserved across
+         * function calls.
+         * %o0 = fire cookie
+         * %o1 = root complex (0=A, 1=B), bus number
+         *
+         * void c_fire_leaf_soft_reset(struct fire_cookie *, uint64 root)
+         */
+
+        ENTRY(c_fire_leaf_soft_reset)
+
+	STRAND_PUSH(%g2, %g6, %g7)
+	STRAND_PUSH(%g3, %g6, %g7)
+	STRAND_PUSH(%g4, %g6, %g7)
+
+        mov     %o0, %g1
+        mov     %o1, %g2
+
+	!! %g1 - fire cookie
+	!! %g2 - root complex (0=A, 1=B)
+	HVCALL(fire_leaf_soft_reset)
+
+        STRAND_POP(%g4, %g6)
+        STRAND_POP(%g3, %g6)
+        STRAND_POP(%g2, %g6)
+
+        retl
+          nop
+        SET_SIZE(c_fire_leaf_soft_reset)
 
 #ifdef DEBUG
 ! When DEBUG is defined hcall.s versions
@@ -2129,5 +3182,118 @@ herr_nomap:	HCALL_RET(ENOMAP)
 herr_inval:	HCALL_RET(EINVAL)
 herr_badalign:	HCALL_RET(EBADALIGN)
 #endif
+
+
+	/*
+	 * This macro brings a given fire leaf's link up
+	 *
+	 * Inputs:
+	 *
+	 *    fire - (preserved) pointer to FIRE_COOKIE
+	 *
+	 * Bring up a fire link. Returns false on failure.
+	 */
+	ENTRY(fire_link_up)
+		/* get the base addr of RC control regs */
+	ldx	[ %o0 + FIRE_COOKIE_PCIE ], %o1
+
+		/* Clear Other Event Status Register LinkDown bit */
+	setx	FIRE_PLC_TLU_CTB_TLR_OE_ERR_RW1C_ALIAS, %o3, %o2
+	ldx	[ %o1 + %o2 ], %o3
+	stx	%o3, [ %o1 + %o2]
+
+		/* The drain bit is cleared via W1C */
+	setx	FIRE_PLC_TLU_CTB_TLR_TLU_STS, %o3, %o2
+	ldx	[ %o1 + %o2 ], %o3
+	stx	%o3, [ %o1 + %o2]
+
+		/* bit 8 of the TLU Control Register is */
+		/* cleared to initiate link training    */
+	setx	FIRE_PLC_TLU_CTB_TLR_TLU_CTL, %o3, %o2
+	ldx	[ %o1 + %o2 ], %o3
+	andn	%o3, 1<<8, %o3
+	stx	%o3, [ %o1 + %o2]
+
+	CPU_MSEC_DELAY(200, %o1, %o2, %o3)
+
+	ldx	[ %o0 + FIRE_COOKIE_CFG ], %o1
+	setx	UPST_CFG_BASE, %o3, %o2
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3	/* 16 reads are    */
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3	/* needed to flush */
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3	/* the fifo after  */
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3	/* toggling the    */
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3	/* link.           */
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+	lduwa	[%o1 + %o2]ASI_P_LE, %o3
+
+	retl
+	  mov	1, %o0
+	SET_SIZE(fire_link_up)
+
+
+
+
+	/*
+	 * This function brings a given fire leaf's link down
+	 * Inputs:
+	 *
+	 *    fire - (preserved) pointer to FIRE_COOKIE
+	 * Returns:
+	 * 	false (0) on failure.
+	 */
+	ENTRY(fire_link_down)
+		/* get the base addr of RC control regs */
+	ldx	[ %o0 + FIRE_COOKIE_PCIE ], %o1
+		/* And now the actual reset code... */
+		/* Remain in detect quiesce */
+	setx	FIRE_PLC_TLU_CTB_TLR_TLU_CTL, %o4, %o2
+	ldx	[ %o1 + %o2 ], %o3
+	or	%o3, 1<<8, %o3
+	stx	%o3, [ %o1 + %o2]
+		/* Disable link */
+	setx	FIRE_PLC_TLU_CTB_LPR_PCIE_LPU_LTSSM_CNTL, %o4, %o2
+	setx	0x80000401, %o4, %o3
+	stx	%o3, [ %o1 + %o2]
+
+		/* Wait for link to go down */
+	setx	FIRE_PLC_TLU_CTB_TLR_TLU_STS, %o4, %o2
+1:
+	ldx	[ %o1 + %o2 ], %o3
+	andcc	%o3, 0x7, %o3
+	cmp	%o3, 0x1
+	bne,pt	%xcc, 1b
+	  nop
+
+	retl
+	  mov	1, %o0
+	SET_SIZE(fire_link_down)
+
+
+
+
+	/*
+	 * Check and see if a fire link is up. Returns true on
+	 * success, false on failure.
+	 */
+	ENTRY(is_fire_port_link_up)
+	ldx	[ %o0 + FIRE_COOKIE_PCIE ], %o1
+	setx	FIRE_PLC_TLU_CTB_TLR_TLU_STS, %o3, %o2
+	ldx	[ %o1 + %o2 ], %o3
+	and	%o3, 0x7, %o3
+	cmp	%o3, 0x4
+	mov	%g0, %o0
+	move	%xcc, 1, %o0
+	retl
+	  nop
+	SET_SIZE(is_fire_port_link_up)
 
 #endif /* CONFIG_FIRE */

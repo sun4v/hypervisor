@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SUN4V_ASI_H
-#define _SUN4V_ASI_H
+#define	_SUN4V_ASI_H
 
-#pragma ident	"@(#)asi.h	1.2	03/11/25 SMI"
+#pragma ident	"@(#)asi.h	1.6	07/07/17 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,12 +70,25 @@ extern "C" {
 #define	ASI_REAL_QLDD_L	0x2e	/* Real-addressed quad-ldd, little-endian */
 
 /*
- * sun4v ASI definitions
+ * 8x8-byte block load/store
  */
+#define	ASI_BLK_P	0xf0	/* Primary address space */
+#define	ASI_BLK_S	0xf1	/* Secondary address space */
+#define	ASI_BLK_PL	0xf8	/* Primary address space, little-endian */
+#define	ASI_BLK_SL	0xf9	/* Secondary address space, little-endian */
+
+/*
+ * sun4v ASR definitions
+ */
+#define	SOFTINT_SET	%asr20
+#define	SOFTINT_CLR	%asr21
+#define	PERFCNTRCTRL	%asr16	/* performance counter control */
 #define	SOFTINT		%asr22	/* softint register */
 #define	TICKCMP		%asr23	/* tick-compare */
 #define	STICK		%asr24	/* system tick register */
 #define	STICKCMP	%asr25	/* stick-compare */
+
+#define	SOFTINT_SM_BIT	(1 << 16)
 
 /*
  * Processor Interrupt Levels

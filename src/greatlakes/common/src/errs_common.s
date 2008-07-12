@@ -42,13 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)errs_common.s	1.6	06/04/26 SMI"
-
-	.file	"subr.s"
+	.ident	"@(#)errs_common.s	1.8	07/05/03 SMI"
 
 #include <sys/asm_linkage.h>
 #include <sys/htypes.h>
@@ -58,8 +56,8 @@
 #include <asi.h>
 
 #include <offsets.h>
+#include <strand.h>
 #include <debug.h>
-#include <cpu.h>
 #include <util.h>
 #include <errs_common.h>
 #include <svc.h>
@@ -83,14 +81,7 @@
 #if defined(CONFIG_FPGA) && defined(CONFIG_SVC)
 	CPU_PUSH(%g7, %g4, %g5, %g6)		/* save return addr */
 	CPU_PUSH(%g2, %g4, %g5, %g6)		/* save unsent flag ptr */
-	PRINT("DIAG ERPT:  ")
-	PRINTX(%g1)
-	PRINT("\r\n")
-	PRINT("UNSENT PTR:  ")
-	PRINTX(%g2)
-	PRINT("\r\n")
-	CPU_STRUCT(%g2)
-	ldx	[%g2 + CPU_ROOT], %g6		/* config data */
+	ROOT_STRUCT(%g6)
 	add	%g6, CONFIG_SRAM_ERPT_BUF_INUSE, %g5
 	mov	ERR_BUF_BUSY, %g4
 	casx	[%g5], %g0, %g4
@@ -106,13 +97,10 @@
 	add	%g6, CONFIG_ERPT_PA, %g2	/* error present pkt */
 	add	%g0, ERPT_SVC_PKT_SIZE, %g3	/* pkt len */
 	HVCALL(svc_internal_send)		/* send erpt */
-	CPU_STRUCT(%g2)
+	brnz,a,pt	%g1, 1f
+	  ldx	[%g2 + CPU_ROOT], %g6		/* config data */
 	CPU_POP(%g4, %g1, %g2, %g3)		/* restore unsent flag ptr */
-	PRINT("UNSENT PTR:  ")
-	PRINTX(%g4)
-	PRINT("\r\n")
 	st	%g0, [%g4]			/* flag as no need to send */
-	ldx	[%g2 + CPU_ROOT], %g1
 	CPU_POP(%g7, %g1, %g2, %g3)		/* restore callers return */
 	HVRET
 1:
@@ -120,7 +108,6 @@
 	 * SRAM is busy, flag so it gets sent later
 	 * %g6 still contains the ROOT
 	 */
-	PRINT("MARK NEED PACKET SENT\r\n")
 	CPU_POP(%g4, %g1, %g2, %g3)
 	mov	1, %g3
 	st	%g3, [%g4]			/* flag pkt */
@@ -131,20 +118,13 @@
 	cmp	%g1, %g3
 	bne,a,pn %xcc, 0b
 	mov	%g3, %g1
-	CPU_STRUCT(%g2)
 	CPU_POP(%g7, %g1, %g2, %g3)	 /* restore callers return */
 	HVRET
 2:
-	PRINT("SOMETHING WENT WRONG\r\n")
 	CPU_POP(%g4, %g1, %g2, %g3)	 /* pop unsent flag ptr */
 	CPU_POP(%g7, %g1, %g2, %g3)	 /* restore callers return */
 	HVRET
 #else   /* !(CONFIG_FPGA && CONFIG_SVC) */
-	mov	%g7, %g2 			/* save return addr */
-	PRINT("&cpu.erpt buf:  ")
-	PRINTX(%g1)
-	PRINT("\r\n")
-	mov	%g2, %g7			/* restore callers return */
 	HVRET
 #endif  /* CONFIG_FPGA && CONFIG_SVC */
 	SET_SIZE(send_diag_erpt)
@@ -164,14 +144,13 @@
  * on the current report in the sram while the notify packet is being delivered
  */
 	ENTRY_NP(send_diag_erpt_nolock)
+#ifdef NO_SVC_EREPORTS
+	HVRET
+#endif
 #if defined(CONFIG_FPGA) && defined(CONFIG_SVC)
 	CPU_PUSH(%g7, %g4, %g5, %g6)		/* save unsent flag ptr */
 	CPU_PUSH(%g2, %g4, %g5, %g6)		/* save return addr */
-	PRINT("NL DIAG ERPT:  ")
-	PRINTX(%g1)
-	PRINT("\r\n")
-	CPU_STRUCT(%g2)
-	ldx	[%g2 + CPU_ROOT], %g6		/* config data */
+	ROOT_STRUCT(%g6)
 	add	%g6, CONFIG_SRAM_ERPT_BUF_INUSE, %g5
 	mov	ERR_BUF_BUSY, %g4
 	casx	[%g5], %g0, %g4
@@ -187,16 +166,13 @@
 	add	%g6, CONFIG_ERPT_PA, %g2	/* error present pkt */
 	add	%g0, ERPT_SVC_PKT_SIZE, %g3	/* pkt len */
 	HVCALL(svc_internal_send_nolock)	/* send erpt */
-	CPU_STRUCT(%g2)
-	ldx	[%g2 + CPU_ROOT], %g6
+	ROOT_STRUCT(%g6)
 	ldx	[%g6 + CONFIG_ERROR_SVCH], %g6	/* error service handle */
 	ld	[%g6 + SVC_CTRL_STATE], %g5
 	andn	%g5, SVC_FLAGS_RI, %g5
 	st	%g5, [%g6 + SVC_CTRL_STATE]	! clear RECV pending
 	UNLOCK(%g6, SVC_CTRL_LOCK)
-	mov	HSCRATCH0, %g6
-	ldxa	[%g6]ASI_HSCRATCHPAD, %g6		! cpu struct
-	ldx	[%g6 + CPU_ROOT], %g6		! data root
+	ROOT_STRUCT(%g6)
 	ldx	[%g6 + CONFIG_SVCS], %g6		! svc root
 	UNLOCK(%g6, HV_SVC_DATA_LOCK)
 	CPU_POP(%g4, %g1, %g2, %g3)
@@ -208,7 +184,6 @@
 	 * SRAM is busy, flag so it gets sent later
 	 * %g6 still contains the ROOT
 	 */
-	PRINT("MARK NEED PACKET SENT\r\n")
 	CPU_POP(%g4, %g1, %g2, %g3)
 	mov	1, %g3
 	st	%g3, [%g4]			/* flag pkt */
@@ -219,21 +194,14 @@
 	cmp	%g1, %g3
 	bne,a,pn %xcc, 0b
 	mov	%g3, %g1
-	CPU_STRUCT(%g2)
 	CPU_POP(%g7, %g1, %g2, %g3)		/* restore callers return */
 
 	HVRET
 2:
-	CPU_STRUCT(%g2)
 	CPU_POP(%g4, %g1, %g2, %g3)		/* pop unsent flag ptr */
 	CPU_POP(%g7, %g1, %g2, %g3)		/* restore callers return */
 	HVRET
 #else   /* !(CONFIG_FPGA && CONFIG_SVC) */
-	mov	%g7, %g2 			/* save return addr */
-	PRINT("&cpu.erpt buf:  ")
-	PRINTX(%g1)
-	PRINT("\r\n")
-	mov	%g2, %g7			/* restore callers return */
 	HVRET
 #endif  /* CONFIG_FPGA && CONFIG_SVC */
 	SET_SIZE(send_diag_erpt_nolock)

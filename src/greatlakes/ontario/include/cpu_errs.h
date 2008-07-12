@@ -42,43 +42,44 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _NIAGARA_CPU_ERRS_H
 #define	_NIAGARA_CPU_ERRS_H
 
-#pragma ident	"@(#)cpu_errs.h	1.49	06/05/30 SMI"
+#pragma ident	"@(#)cpu_errs.h	1.58	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <sun4v/traps.h>
 #include <jbi_regs.h>
 #include <cache.h>
 #include <traps.h>
 
 /*
- * CPU2ERPT_STRUCT - get the erpt from a cpu
+ * STRAND2ERPT_STRUCT - get the erpt from a strand
  *
  * Delay Slot: safe in a delay slot
  */
-#define	CPU2ERPT_STRUCT(BUF, cpu, erpt)		\
-	add	cpu, BUF, erpt
+#define	STRAND2ERPT_STRUCT(BUF, strand, erpt)		\
+	add	strand, BUF, erpt
 
 /*
- * CPU_ERPT_STRUCT - get both the cpu and erpt from scratch
+ * STRAND_ERPT_STRUCT - get both the strand and erpt from scratch
  *
  * Delay Slot: safe in a delay slot
- * Register overlap: if cpu and erpt are the same then only the erpt
+ * Register overlap: if strand and erpt are the same then only the erpt
  *     is returned
- *	CPU2ERPT_STRUCT(BUF, cpu, erpt)
+ *	STRAND2ERPT_STRUCT(BUF, strand, erpt)
  */
 /* BEGIN CSTYLED */
-#define	CPU_ERPT_STRUCT(BUF, cpu, erpt)		\
-	CPU_STRUCT(cpu)				;\
-	CPU2ERPT_STRUCT(BUF, cpu, erpt)
+#define	STRAND_ERPT_STRUCT(BUF, strand, erpt)		\
+	STRAND_STRUCT(strand)				;\
+	STRAND2ERPT_STRUCT(BUF, strand, erpt)
 /* END CSTYLED */
 
 
@@ -190,7 +191,16 @@ extern "C" {
 				    L2_ESR_MAY_MA_CE_BITS | \
 				    L2_ESR_NO_ES_CE_BITS)
 
+/* may require re-routing */
+#define	L2_ESR_REROUTED_BITS	(L2_ESR_LDWU | L2_ESR_LDRU | L2_ESR_LDSU |\
+				    L2_ESR_DAU | L2_ESR_DSU)
+
 #define	L2_ESR_FATAL_BITS	(L2_ESR_LVU | L2_ESR_LRU)
+
+/*
+ * The L2 EAR register is not set for these errors
+ */
+#define	L2_ESR_CE_NO_EAR_BITS	(L2_ESR_LTC | L2_ESR_LDSC | L2_ESR_DSC)
 
 #define	L2_EAR_DRAM_MASK	0x3F
 
@@ -198,7 +208,7 @@ extern "C" {
 /* BEGIN CSTYLED */
 #define	ERPT_BANK_OFF(erpt, bank, scr1) \
 	sllx	bank, BANK_SHIFT, scr1			;\
-	inc	CPU_VBSC_ERPT + EVBSC_BANK, scr1	;\
+	inc	STRAND_VBSC_ERPT + EVBSC_BANK, scr1	;\
 	add	erpt, scr1, scr1
 /* END CSTYLED */
 
@@ -209,9 +219,6 @@ extern "C" {
  * For N1 the err boundry is L2_LINE_SIZE
  */
 #define	ERPT_MEM_SIZE		L2_LINE_SIZE
-
-/* PRIV bit position in TSTATE register - bit 10 */
-#define	TSTATE_PSTATE_PRIV	(PSTATE_PRIV << TSTATE_PSTATE_SHIFT)
 
 
 /*
@@ -237,22 +244,22 @@ extern "C" {
  * It is the bank that an error was detected on.
  */
 /* BEGIN CSTYLED */
-#define	GET_CPU_L2BANK(cpup, scr1) \
-	ldsh	[cpup + CPU_L2BANK], scr1
+#define	GET_STRAND_L2BANK(strand, scr1) \
+	ldsh	[strand + STRAND_L2BANK], scr1
 
-#define	SET_CPU_L2BANK(bank, cpup, scr1) \
+#define	SET_STRAND_L2BANK(bank, strand, scr1) \
 	mov	bank, scr1		;\
-	sth	scr1, [cpup + CPU_L2BANK]
+	sth	scr1, [strand + STRAND_L2BANK]
 
-#define	CLR_CPU_L2BANK(cpup, scr1) \
+#define	CLR_STRAND_L2BANK(strand, scr1) \
 	mov	-1, scr1			;\
-	sth	scr1, [cpup + CPU_L2BANK]
+	sth	scr1, [strand + STRAND_L2BANK]
 
-#define	GET_CPU_RPTFLAGS(cpup, reg) \
-	lduh	[cpup + CPU_RPTFLAGS], reg
+#define	GET_STRAND_RPTFLAGS(strand, reg) \
+	lduh	[strand + STRAND_RPTFLAGS], reg
 
-#define	SET_CPU_RPTFLAGS(cpup, flags) \
-	sth	flags, [cpup + CPU_RPTFLAGS]
+#define	SET_STRAND_RPTFLAGS(strand, flags) \
+	sth	flags, [strand + STRAND_RPTFLAGS]
 /* END CSTYLED */
 
 #define	ERR_SEND_DIAG		(1<<9)
@@ -301,49 +308,50 @@ extern "C" {
  * Create a base diagnostic error report
  */
 /* BEGIN CSTYLED */
-#define	LOAD_BASIC_ERPT(cpup, erpt, scr1, scr2)				 \
+#define	LOAD_BASIC_ERPT(strand, erpt, scr1, scr2)				 \
 	.pushlocals							;\
 	rdpr	%tl, scr1				/* get %tl */	;\
 	sllx	scr1, EHDL_CPUTL_SHIFT, scr2		/* position */	;\
 	dec	scr1					/* guest trap */;\
-	stub	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_TL]			;\
-	ldx	[cpup + ERR_SEQ_NO], scr1		/* seq # */	;\
+	stub	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_TL]		;\
+	ldx	[strand + STRAND_ERR_SEQ_NO], scr1	/* seq # */	;\
 	add	scr1, 1, scr1				/* +1 = new # */;\
-	stx	scr1, [cpup + ERR_SEQ_NO]		/* save */	;\
+	stx	scr1, [strand + STRAND_ERR_SEQ_NO]	/* save */	;\
 	sllx	scr1, 64 - EHDL_CPUTL_SHIFT, scr1	/* clear upper */;\
 	srlx	scr1, 64 - EHDL_CPUTL_SHIFT, scr1	/*  bits */	;\
 	or	scr2, scr1, scr1			/* tl | seq */	;\
-	ldub	[cpup + CPU_PID], scr2			/* get CPUID */	;\
-	stuh	scr2, [erpt + CPU_VBSC_ERPT + EVBSC_CPUID]		;\
-	ldub	[cpup + CPU_VID], scr2			/* guest cpuid */;\
-	stuh	scr2, [erpt + CPU_SUN4V_ERPT + ESUN4V_G_CPUID]		;\
+	ldub	[strand + STRAND_ID], scr2		/* get CPUID */	;\
+	stuh	scr2, [erpt + STRAND_VBSC_ERPT + EVBSC_CPUID]		;\
+	VCPU_STRUCT(scr2)						;\
+	ldub	[scr2 + CPU_VID], scr2			/* guest cpuid */;\
+	stuh	scr2, [erpt + STRAND_SUN4V_ERPT + ESUN4V_G_CPUID]	;\
 	sllx	scr2, EHDL_CPUTL_SHIFT + EHDL_TL_BITS, scr2 /* position */;\
 	or	scr2, scr1, scr1			/* cpuid|tl|seq */;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_EHDL]		;\
-	stx	scr1, [erpt + CPU_SUN4V_ERPT + ESUN4V_G_EHDL]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_EHDL]		;\
+	stx	scr1, [erpt + STRAND_SUN4V_ERPT + ESUN4V_G_EHDL]	;\
 	ROOT_STRUCT(scr1)						;\
 	ldx    [scr1 + CONFIG_TOD], scr1				;\
 	brnz,a,pn	scr1, 1f					;\
 	  ldx	[scr1], scr1			/* aborted if no TOD */	;\
 1:	rd	STICK, scr2				/* stick */	;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_FPGA_TOD]		;\
-	stx	scr2, [erpt + CPU_VBSC_ERPT + EVBSC_STICK]		;\
-	stx	scr2, [erpt + CPU_SUN4V_ERPT + ESUN4V_G_STICK]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_FPGA_TOD]	;\
+	stx	scr2, [erpt + STRAND_VBSC_ERPT + EVBSC_STICK]		;\
+	stx	scr2, [erpt + STRAND_SUN4V_ERPT + ESUN4V_G_STICK]	;\
 	set	ERPT_TYPE_CPU, scr1			/* cpu/mem */	;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_REPORT_TYPE]	;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_REPORT_TYPE]	;\
 	rdhpr	%hver, scr1				/* cpu version */;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_CPUVER]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_CPUVER]		;\
 	setx	IOBBASE + PROC_SER_NUM, scr1, scr2 /* ->cpu serial # */	;\
 	ldx	[scr2], scr1				/* cpu serial # */;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_CPUSERIAL]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_CPUSERIAL]	;\
 	rdpr	%tstate, scr1				/* tstate */	;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_TSTATE]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_TSTATE]		;\
 	rdhpr	%htstate, scr1				/* htstate */	;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_HTSTATE]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_HTSTATE]		;\
 	rdpr	%tpc, scr1				/* tpc */	;\
-	stx	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_TPC]		;\
+	stx	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_TPC]		;\
 	rdpr	%tt, scr1				/* trap type */	;\
-	stuh	scr1, [erpt + CPU_VBSC_ERPT + EVBSC_TT]			;\
+	stuh	scr1, [erpt + STRAND_VBSC_ERPT + EVBSC_TT]		;\
 	.poplocals
 /* END CSTYLED */
 
@@ -351,12 +359,12 @@ extern "C" {
  * Get and compare the PID to the ERRORSTEER
  */
 /* BEGIN CSTYLED */
-#define	IS_PID_STEER(cpup, pid, sid)	/* pid & sid are returned */	 \
-	setx	L2_CONTROL_REG, pid, sid	/* get the steer cpu */	;\
+#define	IS_PID_STEER(strand, pid, sid)	/* pid & sid are returned */	 \
+	setx	L2_CONTROL_REG, pid, sid /* get the steer strand */	;\
 	ldx	[sid], sid						;\
 	srlx	sid, L2_ERRORSTEER_SHIFT, sid				;\
-	and	sid, NCPUS - 1, sid					;\
-	ldub	[cpup + CPU_PID], pid	/* my pid */			;\
+	and	sid, NSTRANDS - 1, sid					;\
+	ldub	[strand + STRAND_ID], pid	/* my pid */		;\
 	cmp	pid, sid		/* am I the steer target? */
 /* END CSTYLED */
 
@@ -374,13 +382,13 @@ extern "C" {
 /* BEGIN CSTYLED */
 #define	CLEAR_DRAM_ESR(BNUM, erpt, scr1, scr2)				 \
 	setx	DRAM_ESR_BASE + BNUM * DRAM_BANK_STEP, scr1, scr2	;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr1		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr1		;\
 	stx	scr1, [scr2]	/* clear DRAM ESR */
 /* END CSTYLED */
 
 /*
  * Fill the error descriptor and attributes of guest error report
- *	ERPT_OFFSET_VAL - offset of error report in cpu structure
+ *	ERPT_OFFSET_VAL - offset of error report in strand structure
  *	EATTR_VAL - error attribute, eg, MEM, IRF, FRF, etc
  *	EDESC_VAL - error description, eg, resumable, nonresumable.
  */
@@ -395,18 +403,18 @@ extern "C" {
 	sllx	reg3, ERR_ATTR_MODE_SHIFT, reg3				;\
 	or	reg3, EATTR_VAL, reg3		/* error attributes */	;\
 	mov	EDESC_VAL, reg2			/* error description */	;\
-	CPU_STRUCT(reg1)			/* cpu pointer */	;\
+	STRAND_STRUCT(reg1)			/* strand pointer */	;\
 	add	reg1, ERPT_OFFSET_VAL, reg1	/* ereport pointer */	;\
-	stw	reg2, [reg1 + CPU_SUN4V_ERPT + ESUN4V_EDESC] /* err desc */;\
-	stw	reg3, [reg1 + CPU_SUN4V_ERPT + ESUN4V_ATTR]
+	stw	reg2, [reg1 + STRAND_SUN4V_ERPT + ESUN4V_EDESC] /* err desc */;\
+	stw	reg3, [reg1 + STRAND_SUN4V_ERPT + ESUN4V_ATTR]
 /* END CSTYLED */
 
 /*
  * Read the afsr to see if the certain error bit is set. If it is, check
- * afar to see if it is the same as saved one in cpu structure. If they
+ * afar to see if it is the same as saved one in strand structure. If they
  * are the same, clear afsr and afar since the error was caused by
  * re-read in error handler.
- *      ERPT_OFFSET_VAL - offset of error report in cpu structure
+ *      ERPT_OFFSET_VAL - offset of error report in strand structure
  *      ERR_BIT - error bit we want to check
  */
 /* BEGIN CSTYLED */
@@ -418,9 +426,9 @@ extern "C" {
 	bz	%xcc, 1f		/* not set, we are done */	;\
 	nop								;\
 	ldxa	[%g0]ASI_SPARC_ERR_ADDR, scr3	/* SPARC afar */	;\
-	CPU_STRUCT(scr1)			/* cpu pointer */	;\
+	STRAND_STRUCT(scr1)			/* strand pointer */	;\
 	add	scr1, ERPT_OFFSET_VAL, scr1	/* scr1 - erpt pointer */;\
-	ldx	[scr1 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], scr4 /* saved afar */;\
+	ldx	[scr1 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], scr4 /* saved afar */;\
 	cmp	scr3, scr4		/* are they same? */		;\
 	bnz	1f		/* different addr, we are done */	;\
 	nop								;\
@@ -435,15 +443,14 @@ extern "C" {
  */
 #define	CPU_ERR_INVALID_RA		(-1)
 
-#define	CPU_ERR_PA_TO_RA(cpu, paddr, raddr, scr1, scr2)			\
+#define	CPU_ERR_PA_TO_RA(vcpu, paddr, raddr, scr1, scr2)		\
 	.pushlocals							;\
-	CPU2GUEST_STRUCT(cpu, scr1)					;\
-	GUEST_P2R_ADDR(scr1, paddr, raddr, scr2)			;\
-	RANGE_CHECK(scr1, raddr, 1, 1f, scr2)				;\
-	ba	2f							;\
-	  nop								;\
-1:	mov	CPU_ERR_INVALID_RA, raddr				;\
-2:									;\
+	VCPU2GUEST_STRUCT(vcpu, vcpu) /* vcpu -> guestp */		;\
+	PA2RA_CONV(vcpu, paddr, raddr, scr1, scr2)			;\
+	brnz,a,pn	scr2, 1f	/* ret 0 is success */		;\
+	  mov	CPU_ERR_INVALID_RA, raddr				;\
+1:									;\
+	VCPU_STRUCT(vcpu) /* restore VCPU */				;\
 	.poplocals
 
 /*
@@ -452,8 +459,8 @@ extern "C" {
  * Currently no offset is used for non-cacheable I/O addresses. This
  * may change in the future.
  */
-#define	CPU_ERR_IO_PA_TO_RA(cpu, paddr, raddr, scr1, scr2, scr3, lbl)	\
-	CPU2GUEST_STRUCT(cpu, scr1)				;\
+#define	CPU_ERR_IO_PA_TO_RA(vcpu, paddr, raddr, scr1, scr2, scr3, lbl)	\
+	VCPU2GUEST_STRUCT(vcpu, scr1)				;\
 	mov	paddr, raddr					;\
 	RANGE_CHECK_IO(scr1, raddr, 1, lbl/**/pass, lbl/**/fail, scr2, scr3) ;\
 lbl/**/fail:							;\
@@ -499,13 +506,13 @@ lbl/**/pass:
  * DAC: DRAM Data Correctable ECC Error
  */
 /* BEGIN CSTYLED */
-#define	DAC_HANDLER(BNUM, cpup, erpt, l2esr, reg1, reg2, reg3)		 \
+#define	DAC_HANDLER(BNUM, strand, erpt, l2esr, reg1, reg2, reg3)		 \
 	PRINT("DAC DIAG\r\n")						;\
 	CPU_PUSH(erpt, reg1, reg2, reg3)				;\
-	CPU_PUSH(cpup, reg1, reg2, reg3)				;\
+	CPU_PUSH(strand, reg1, reg2, reg3)				;\
 	mov	BNUM, %g1						;\
 	HVCALL(err_determine_disposition)				;\
-	CPU_POP(cpup, reg1, reg2, reg3)					;\
+	CPU_POP(strand, reg1, reg2, reg3)					;\
 	CPU_POP(erpt, reg1, reg2, reg3)					;\
 	/* Clear DAC status bit in DRAM ESR */				;\
 	CLEAR_DRAM_ESR(BNUM, erpt, reg1, reg2)
@@ -515,10 +522,10 @@ lbl/**/pass:
  * DRC: DRAM Data Correctable ECC Error on DMA Read/Write Partial
  */
 /* BEGIN CSTYLED */
-#define	DRC_HANDLER(BNUM, cpup, erpt, reg1, reg2, reg3)			 \
+#define	DRC_HANDLER(BNUM, strand, erpt, reg1, reg2, reg3)			 \
 	mov	BNUM, %g1						;\
 	HVCALL(err_determine_disposition)				;\
-	CPU_ERPT_STRUCT(CPU_CE_RPT, cpup, erpt)	/* restore */		;\
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, strand, erpt)	/* restore */		;\
 	/* Clear DRC status bit in DRAM ESR */				;\
 	CLEAR_DRAM_ESR(BNUM, erpt, reg1, reg2)				;\
 	PRINT("DRC DIAG\r\n")
@@ -551,14 +558,14 @@ lbl/**/pass:
  * The HW corrected the error but didn't correct the version on the
  * L2. We need to read the address in error and write it back in
  * order to clear the error from the L2
- * we saved the error address before in the cput.  We need to just
+ * we saved the error address before put it in the strand.  We need to just
  * get it from there
  */
 /* BEGIN CSTYLED */
-#define	LDAC_HANDLER(BNUM, cpup, erpt, l2esr, reg1, reg2, scr1)		 \
+#define	LDAC_HANDLER(BNUM, strand, erpt, l2esr, reg1, reg2, scr1)		 \
 	/* Correct the error source */					;\
 	.pushlocals							;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(BNUM)], reg1			;\
 	set	N_LONG_IN_LINE, reg2					;\
 1:	ldx	[reg1], scr1	/* reread error address */		;\
 	stx	scr1, [reg1]	/* writeback h/w corrected data */	;\
@@ -610,17 +617,17 @@ lbl/**/pass:
  * This new trap will have no errors set
  */
 /* BEGIN CSTYLED */
-#define	LTC_HANDLER(BNUM, cpup, erpt, reg1, reg2, reg3, reg4)		 \
+#define	LTC_HANDLER(BNUM, strand, erpt, reg1, reg2, reg3, reg4)		 \
 	.pushlocals							;\
 	PRINT("LTC DIAG\r\n")						;\
 	/*								;\
 	 * Need to cause a cache miss (aka. not a hit) so the HW	;\
 	 * scrubber clears the err					;\
 	 */								;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(BNUM)], reg1			;\
 	/*								;\
 	 * We will use erpt as a scratch register for the memory	;\
-	 * mask and restore it from cpup when done.			;\
+	 * mask and restore it from strand when done.			;\
 	 */								;\
 	setx	JBI_MEMSIZE, reg3, erpt					;\
 	ldx	[erpt], erpt			/* GB of memory */	;\
@@ -648,7 +655,7 @@ lbl/**/pass:
 	/*								;\
 	 * restore erpt							;\
 	 */								;\
-	add	cpup, CPU_CE_RPT, erpt					;\
+	add	strand, STRAND_CE_RPT, erpt				;\
 	.poplocals
 
 /* END CSTYLED */
@@ -675,12 +682,12 @@ lbl/**/pass:
  * LDRC: L2$ Data Correctable Error on DMA access.
  * XXX The check for transient or persistent error is not implemented yet.
  * This handler rereads the L2$ data and writes the corrected back.
- * The physical address is stored in the cpu structure.
+ * The physical address is stored in the strand structure.
  */
 /* BEGIN CSTYLED */
 #define	LDRC_HANDLER(BNUM, erpt, reg1, reg2, reg3)			 \
 	/* Correct the error source */					;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], reg1			;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(BNUM)], reg1			;\
 	ldx	[reg1], reg2	/* reread error address */		;\
 	stx	reg2, [reg1]	/* writeback h/w corrected data */	;\
 	PRINT("LDRC DIAG\r\n")
@@ -688,47 +695,47 @@ lbl/**/pass:
 
 /*
  * Macro to save the state of the line
- *   cpup or erpt MUST NOT be %g4
+ *   strand or erpt MUST NOT be %g4
  *
  * Since all the registers are clobbered in check_l2_state(), we will just
  *   call them out directly here and avoid the restrictions of having them
  *   correctly declared in the macro.
- * Only the cpup and erpt registers are declared so they can be properly used
+ * Only the strand and erpt registers are declared so they can be properly used
  *   and restored.
  */
 /* BEGIN CSTYLED */
-#define	SAVE_L2_LINE_STATE(BNUM, E_OFF, cpup, erpt)			 \
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], %g1			;\
+#define	SAVE_L2_LINE_STATE(BNUM, E_OFF, strand, erpt)			 \
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(BNUM)], %g1		;\
 	/* Input pa is in %g1, get the line state, result is in %g4 */	;\
 	HVCALL(check_l2_state)	/* all other regs get garbled */	;\
 	PRINT("L2 Line State ")						;\
-	PRINTW(%g4)							;\
+	PRINTX(%g4)							;\
 	PRINT("\r\n")							;\
-	CPU_ERPT_STRUCT(E_OFF, cpup, erpt)	/* restore */		;\
-	stx	%g4, [cpup + CPU_L2_LINE_STATE]
+	STRAND_ERPT_STRUCT(E_OFF, strand, erpt)	/* restore */		;\
+	stx	%g4, [strand + STRAND_L2_LINE_STATE]
 /* END CSTYLED */
 
 /*
  * Macro to process CE bits logged in the L2 ESR
  */
 /* BEGIN CSTYLED */
-#define	PROCESS_CE_IN_L2_ESR(BNUM, cpup, erpt, l2esr, reg1, reg2, reg3)	 \
+#define	PROCESS_CE_IN_L2_ESR(BNUM, strand, erpt, l2esr, reg1, reg2, reg3)	 \
 	.pushlocals							;\
 	PRINT("PROCESS CE Bank ")					;\
 	/*	PRINTB(BNUM)	*/					;\
 	PRINT("\r\n")							;\
-	add	cpup, CPU_CE_RPT, erpt					;\
+	add	strand, STRAND_CE_RPT, erpt				;\
 	setx	L2_ESR_LDAC, reg3, reg1		/* LDAC */		;\
 	btst	reg1, l2esr			/* LDAC? */		;\
 	bz,pt	%xcc, 1f			/* no, goto 1 */	;\
 	nop								;\
-	LDAC_HANDLER(BNUM, cpup, erpt, l2esr, reg1, reg2, reg3)		;\
+	LDAC_HANDLER(BNUM, strand, erpt, l2esr, reg1, reg2, reg3)	;\
 	ba,a	9f							;\
 1:	  setx	L2_ESR_DAC, reg3, reg1		/* DAC */		;\
 	btst	reg1, l2esr			/* DAC? */		;\
 	bz,pt	%xcc, 2f			/* no, goto 2 */	;\
 	nop								;\
-	DAC_HANDLER(BNUM, cpup, erpt, l2esr, reg1, reg2, reg3)		;\
+	DAC_HANDLER(BNUM, strand, erpt, l2esr, reg1, reg2, reg3)	;\
 	ba,a	9f							;\
 2:	  setx	L2_ESR_LDWC, reg3, reg1		/* LDWC */		;\
 	btst	reg1, l2esr			/* LDWC? */		;\
@@ -752,13 +759,13 @@ lbl/**/pass:
 	btst	reg1, l2esr			/* LTC? */		;\
 	bz,pt	%xcc, 6f			/* no, goto 6 */	;\
 	nop								;\
-	LTC_HANDLER(BNUM, cpup, erpt, reg1, reg2, reg3, l2esr)		;\
+	LTC_HANDLER(BNUM, strand, erpt, reg1, reg2, reg3, l2esr)	;\
 	ba,a	9f							;\
 6:	  setx	L2_ESR_DRC, reg3, reg1		/* DRC */		;\
 	btst	reg1, l2esr			/* DRC? */		;\
 	bz,pt	%xcc, 7f			/* no, goto 7 */	;\
 	nop								;\
-	DRC_HANDLER(BNUM, cpup, erpt, reg1, reg2, reg3)			;\
+	DRC_HANDLER(BNUM, strand, erpt, reg1, reg2, reg3)		;\
 	ba,a	9f							;\
 7:	  setx	L2_ESR_DSC, reg3, reg1		/* DSC */		;\
 	btst	reg1, l2esr			/* DSC? */		;\
@@ -784,9 +791,9 @@ lbl/**/pass:
  */
 /* BEGIN CSTYLED */
 #define	DIS_UE_CHECK_L2_ESR(BNUM, l2esr, scr2, scr3, scr4)		 \
-	CPU_STRUCT(scr2)			/* cpu pointer */	;\
-	add	scr2, CPU_CE_RPT, scr2		/* CE error report */	;\
-	ldx	[scr2 + CPU_EVBSC_L2_AFSR(BNUM)], l2esr			;\
+	STRAND_STRUCT(scr2)			/* strand pointer */	;\
+	add	scr2, STRAND_CE_RPT, scr2	/* CE error report */	;\
+	ldx	[scr2 + STRAND_EVBSC_L2_AFSR(BNUM)], l2esr		;\
 	/* l2esr has L2 ESR */						;\
 	setx	L2_ESR_DUE_BITS | L2_ESR_MEU, scr3, scr4/* DUE bits */	;\
 	btst	scr4, l2esr				/* any set? */
@@ -798,9 +805,9 @@ lbl/**/pass:
  */
 /* BEGIN CSTYLED */
 #define	UE_CHECK_L2_ESR(BNUM, l2esr, scr2, scr3, scr4)			 \
-	CPU_STRUCT(scr2)			/* cpu pointer */	;\
-	add	scr2, CPU_UE_RPT, scr2		/* UE error report */	;\
-	ldx	[scr2 + CPU_EVBSC_L2_AFSR(BNUM)], l2esr			;\
+	STRAND_STRUCT(scr2)			/* strand pointer */	;\
+	add	scr2, STRAND_UE_RPT, scr2		/* UE error report */	;\
+	ldx	[scr2 + STRAND_EVBSC_L2_AFSR(BNUM)], l2esr		;\
 	/* l2esr has L2 ESR */						;\
 	setx	L2_ESR_UE_BITS | L2_ESR_MEU, scr3, scr4	/* UE bits */	;\
 	btst	scr4, l2esr				/* any set? */
@@ -834,16 +841,16 @@ lbl/**/pass:
  * Check the L2 ESR for the specified bank for CE bits
  * Disrupting errors are captured in CPU.ce_rpt
  *
- * STEER and Steer error bits are checked so the correct cpu handles them.
+ * STEER and Steer error bits are checked so the correct strand handles them.
  */
 /* BEGIN CSTYLED */
-#define	CHECK_L2_ESR_CE(cpup, l2esr, scr1, scr2)			 \
+#define	CHECK_L2_ESR_CE(strand, l2esr, scr1, scr2)			 \
 	.pushlocals							;\
 	setx	L2_ESR_CE_BITS, scr1, scr2	/* Correctable bits */	;\
 	btst	scr2, l2esr			/* Any set? */		;\
 	bz,a,pn	%xcc, 9f			/*   no */		;\
 	  nop					/* z == skip */	;\
-	IS_PID_STEER(cpup, scr1, scr2)		/* steer target? */	;\
+	IS_PID_STEER(strand, scr1, scr2)	/* steer target? */	;\
 	bz,a,pt	%xcc, 9f			/*   yes: go do it */	;\
 	  cmp	%g0, 1				/* nz = process */	;\
 	setx	L2_ESR_NONS_CE_BITS, scr1, scr2 /* non-steer bits are */;\
@@ -852,14 +859,14 @@ lbl/**/pass:
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	CE_CHECK_L2_ESR(BNUM, cpup, scr1, scr2, scr3)		 	 \
+#define	CE_CHECK_L2_ESR(BNUM, strand, scr1, scr2, scr3)		 	 \
 	.pushlocals							;\
 	mov	BNUM, scr2						;\
 	BTST_L2_BANK_EEN(scr2, CEEN, scr2, scr3)/* Bank blackout? */	;\
 	bz,a	%xcc, 9f			/*   yes: skip */	;\
 	  nop					/* z == skip */		;\
-	ldx	[cpup + CPU_CE_RPT + CPU_EVBSC_L2_AFSR(BNUM)], scr1	;\
-	CHECK_L2_ESR_CE(cpup, scr1, scr2, scr3)	/* scr1 = l2esr */	;\
+	ldx	[strand + STRAND_CE_RPT + STRAND_EVBSC_L2_AFSR(BNUM)], scr1	;\
+	CHECK_L2_ESR_CE(strand , scr1, scr2, scr3)	/* scr1 = l2esr */	;\
 9:	.poplocals			/* z == skip, nz = process */
 /* END CSTYLED */
 
@@ -869,12 +876,12 @@ lbl/**/pass:
  *
  * On input esr = sparc esr, it is clobbered.
  * Check the Sparc & L2 ESR's (all banks) for CE bits
- * STEER and Steer error bits are checked so the correct cpu handles them.
+ * STEER and Steer error bits are checked so the correct strand handles them.
  */
 /* BEGIN CSTYLED */
-#define	CE_CHECK(cpup, esr, scr1, scr2, scr3)			 	 \
+#define	CE_CHECK(strand, esr, scr1, scr2, scr3)			 	 \
 	.pushlocals							;\
-	lduw	[cpup + CPU_ERR_FLAG], scr3	/* blackout bits */	;\
+	lduw	[strand + STRAND_ERR_FLAG], scr3 /* blackout bits */	;\
 	btst	ERR_FLAG_SPARC, scr3		/* blackout? */		;\
 	bnz,pn	%xcc, 0f			/*   yes: skip */	;\
 	set	SPARC_CE_BITS, scr1		/* valid CE bits */	;\
@@ -902,7 +909,7 @@ lbl/**/pass:
 	  nop								;\
 	ldx	[scr2 + 3*L2_BANK_STEP], scr3				;\
 	bset	scr3, esr						;\
-4:	CHECK_L2_ESR_CE(cpup, esr, scr1, scr2)	/* nz = process */	;\
+4:	CHECK_L2_ESR_CE(strand, esr, scr1, scr2)	/* nz = process */	;\
 9:	.poplocals			/* z == skip, nz = process */
 /* END CSTYLED */
 
@@ -916,38 +923,38 @@ lbl/**/pass:
 #define	DRAM_EAR_CHANNEL_SHIFT		6
 
 /*
- * Dump the L2 and DRAM error log registers in the CPU error report
+ * Dump the L2 and DRAM error log registers in the STRAND error report
  * area.
- * NOTE: cpup and erpt are input arguments.
+ * NOTE: strand and erpt are input arguments.
  */
 /* BEGIN CSTYLED */
-#define	DUMP_L2_DRAM_ERROR_LOGS(cpup, erpt, scr3, scr4, scr5, scr6, scr7)\
+#define	DUMP_L2_DRAM_ERROR_LOGS(strand, erpt, scr3, scr4, scr5, scr6, scr7)\
 	/* save the L2 & DRAM ESRs in the diagnostic report area */	;\
 	.pushlocals							;\
 	setx	L2_ESR_BASE, scr3, scr4	/* scr4 = L2_ESR_BASE */	;\
 	setx	L2_EAR_BASE, scr3, scr5	/* scr4 = L2_EAR_BASE */	;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFSR(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFSR(0)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFAR(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFAR(0)]			;\
 	add	scr4, L2_BANK_STEP, scr4		/* next bank */	;\
 	add	scr5, L2_BANK_STEP, scr5				;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFSR(1)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFSR(1)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFAR(1)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFAR(1)]			;\
 	add	scr4, L2_BANK_STEP, scr4		/* next bank */	;\
 	add	scr5, L2_BANK_STEP, scr5				;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFSR(2)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFSR(2)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFAR(2)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFAR(2)]			;\
 	add	scr4, L2_BANK_STEP, scr4		/* next bank */	;\
 	add	scr5, L2_BANK_STEP, scr5				;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFSR(3)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFSR(3)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_L2_AFAR(3)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_L2_AFAR(3)]			;\
 	/* store DRAM ESRs in diagnostic report area */			;\
 	/*								;\
 	 * Channel info. is not stored in DRAM EAR for all errors	;\
@@ -957,74 +964,74 @@ lbl/**/pass:
 	setx	DRAM_EAR_BASE, scr3, scr5  /* scr5 = DRAM_EAR_BASE */	;\
 	set	DRAM_BANK_STEP, scr6					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFSR(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFSR(0)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFAR(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFAR(0)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFSR(1)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFSR(1)]			;\
 	ldx	[scr5], scr3						;\
 	brnz,a	scr3, 1f						;\
 	  or	scr3, (1 << DRAM_EAR_CHANNEL_SHIFT), scr3 /* CH 1 */	;\
-1:	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFAR(1)]			;\
+1:	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFAR(1)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFSR(2)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFSR(2)]			;\
 	ldx	[scr5], scr3						;\
 	brnz,a	scr3, 1f						;\
 	  or	scr3, (2 << DRAM_EAR_CHANNEL_SHIFT), scr3 /* CH 2 */	;\
-1:	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFAR(2)]			;\
+1:	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFAR(2)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFSR(3)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFSR(3)]			;\
 	ldx	[scr5], scr3						;\
 	brnz,a	scr3, 1f						;\
 	  or	scr3, (3 << DRAM_EAR_CHANNEL_SHIFT), scr3 /* CH 3 */	;\
-1:	stx	scr3, [erpt + CPU_EVBSC_DRAM_AFAR(3)]			;\
+1:	stx	scr3, [erpt + STRAND_EVBSC_DRAM_AFAR(3)]			;\
 	/* store DRAM error counter registers and error location registers*/;\
 	setx	DRAM_ECR_BASE, scr3, scr4	/* scr4 = DRAM_ECR_BASE */;\
 	setx	DRAM_ELR_BASE, scr3, scr5	/* scr4 = DRAM_ELR_BASE */;\
 	set	DRAM_BANK_STEP, scr6					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_CNTR(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_CNTR(0)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_LOC(0)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_LOC(0)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_CNTR(1)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_CNTR(1)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_LOC(1)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_LOC(1)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_CNTR(2)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_CNTR(2)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_LOC(2)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_LOC(2)]			;\
 	add	scr4, scr6, scr4		/* next bank */		;\
 	add	scr5, scr6, scr5					;\
 	ldx	[scr4], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_CNTR(3)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_CNTR(3)]			;\
 	ldx	[scr5], scr3						;\
-	stx	scr3, [erpt + CPU_EVBSC_DRAM_LOC(3)]			;\
+	stx	scr3, [erpt + STRAND_EVBSC_DRAM_LOC(3)]			;\
 	.poplocals
 /* END CSTYLED */
 
 /*
  * Dump all 12 ways of the l2 information to the passed buffer
- * reg1 must be passed as %g1 (may be the same as cpup)
+ * reg1 must be passed as %g1 (may be the same as strand)
  * reg2 must be passed as %g2 (may be the same as erpt)
  */
 /* BEGIN CSTYLED */
-#define	DUMP_L2_SET_TAG_DATA(BNUM, ERPT_OFFSET_VAL, cpup, erpt, reg1, reg2)\
+#define	DUMP_L2_SET_TAG_DATA(BNUM, ERPT_OFFSET_VAL, strand, erpt, reg1, reg2)\
 	PRINT("DUMPING THE L2\r\n")					;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], reg1			;\
-	add	erpt, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg2		;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFAR(BNUM)], reg1		;\
+	add	erpt, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg2		;\
 	HVCALL(dump_l2_set_tag_data_ecc)	/* %g1-6 clobbered */	;\
-	CPU_ERPT_STRUCT(ERPT_OFFSET_VAL, cpup, erpt)
+	STRAND_ERPT_STRUCT(ERPT_OFFSET_VAL, strand, erpt)
 /* END CSTYLED */
 
 /*
@@ -1034,10 +1041,10 @@ lbl/**/pass:
 #define	DUMP_ICACHE_INFO(ERPT_OFFSET_VAL, scr1, scr2, scr3, scr4, scr5,	 \
 			scr6, scr7)					 \
 	.pushlocals							;\
-	CPU_STRUCT(scr1)			/* cpu pointer */	;\
+	STRAND_STRUCT(scr1)			/* strand pointer */	;\
 	add	scr1, ERPT_OFFSET_VAL, scr1	/* ereport pointer */	;\
-	ldx	[scr1 + CPU_VBSC_ERPT + EVBSC_SPARC_AFAR], scr2 /* addr */;\
-	add	scr1, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, scr1 /* diag buf */;\
+	ldx	[scr1 + STRAND_VBSC_ERPT + EVBSC_SPARC_AFAR], scr2 /* addr */;\
+	add	scr1, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, scr1 /* diag buf */;\
 	ldxa	[%g0]ASI_LSUCR, scr3		/* lsu-diag */		;\
 	stx	scr3, [scr1 + ICACHE_LSU_DIAG_REG] /* save it to buf */;\
 	set	(ICACHE_MAX_WAYS - 1) , scr3				;\
@@ -1058,35 +1065,35 @@ lbl/**/pass:
 	set	(0 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(0)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(0)] /* save data */;\
 	set	(1 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(1)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(1)] /* save data */;\
 	set	(2 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(2)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(2)] /* save data */;\
 	set	(3 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(3)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(3)] /* save data */;\
 	set	(4 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(4)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(4)] /* save data */;\
 	set	(5 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(5)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(5)] /* save data */;\
 	set	(6 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(6)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(6)] /* save data */;\
 	set	(7 << ICACHE_INSTR_WORD_SHIFT), scr5 /* first word */	;\
 	or	scr4, scr5, scr5		/* create address */	;\
 	ldxa	[scr5]ASI_ICACHE_INSTR, scr5	/* get data */		;\
-	stx	scr5, [scr6 + CPU_EVBSC_ICACHE_DIAG_DATA(7)] /* save data */;\
+	stx	scr5, [scr6 + STRAND_EVBSC_ICACHE_DIAG_DATA(7)] /* save data */;\
 2:									;\
 	subcc	scr3, 1, scr3						;\
 	bge,pt	%xcc, 1b			/* next way? */		;\
@@ -1101,8 +1108,8 @@ lbl/**/pass:
 #define	DUMP_DCACHE_INFO(ERPT_OFFSET_VAL, scr1, scr2, scr3, scr4, scr5,	 \
 			scr6, scr7)					 \
 	.pushlocals							;\
-	CPU_STRUCT(scr1)			/* cpu pointer */	;\
-	add	scr1, ERPT_OFFSET_VAL + CPU_VBSC_ERPT, scr1 /* erpt */	;\
+	STRAND_STRUCT(scr1)			/* strand pointer */	;\
+	add	scr1, ERPT_OFFSET_VAL + STRAND_VBSC_ERPT, scr1 /* erpt */	;\
 	ldx	[scr1 + EVBSC_SPARC_AFAR], scr2	/* get addr */		;\
 	and	scr2, DCACHE_SET, scr2		/* extract set */	;\
 	add	scr1, EVBSC_DIAG_BUF, scr1	/* diag buf */		;\
@@ -1123,12 +1130,12 @@ lbl/**/pass:
 	and	scr6, scr7, scr6					;\
 	sllx	scr6, DCACHE_TAG_SHIFT, scr6				;\
 	ldxa	[scr6 + scr2] ASI_DC_DATA, scr5				;\
-	stx	scr5, [scr4 + CPU_EVBSC_DCACHE_DATA(0)]			;\
+	stx	scr5, [scr4 + STRAND_EVBSC_DCACHE_DATA(0)]			;\
 	set	1, scr5							;\
 	sllx	scr5, DCACHE_WORD_SHIFT, scr5				;\
 	or	scr6, scr5, scr5					;\
 	ldxa	[scr5 + scr2] ASI_DC_DATA, scr6				;\
-	stx	scr6, [scr4 + CPU_EVBSC_DCACHE_DATA(1)]			;\
+	stx	scr6, [scr4 + STRAND_EVBSC_DCACHE_DATA(1)]			;\
 2:									;\
 	deccc	scr3							;\
 	bge,pt	%xcc, 1b			/* next way? */		;\
@@ -1143,10 +1150,10 @@ lbl/**/pass:
  * and store them into the buffer
  */
 /* BEGIN CSTYLED */
-#define	DUMP_DRAM_CONTENTS(BNUM, ERPT_OFFSET_VAL, cpup, scr1, scr2, scr3)\
+#define	DUMP_DRAM_CONTENTS(BNUM, ERPT_OFFSET_VAL, strand, scr1, scr2, scr3)\
 	.pushlocals							;\
-	ldx	[cpup + ERPT_OFFSET_VAL + CPU_EVBSC_L2_AFAR(BNUM)], scr2;\
-	add	cpup, ERPT_OFFSET_VAL + CPU_VBSC_ERPT + EVBSC_DIAG_BUF, scr1;\
+	ldx	[strand + ERPT_OFFSET_VAL + STRAND_EVBSC_L2_AFAR(BNUM)], scr2;\
+	add	strand, ERPT_OFFSET_VAL + STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, scr1;\
 	add	scr2, L2_LINE_SIZE, scr2		/* align addr */;\
 	andn	scr2, L2_LINE_SIZE, scr2				;\
 	ldx	[scr2 + (0 * SIZEOF_UI64)], scr3	/* read word */	;\
@@ -1166,34 +1173,42 @@ lbl/**/pass:
 	ldx	[scr2 + (7 * SIZEOF_UI64)], scr3	/* read word */	;\
 	stx	scr3, [scr1 + DRAM_CONTENTS(7)]		/* store word */;\
 	.poplocals
+
+#define	CLEAR_DRAM_CONTENTS(BNUM, ERPT_OFFSET_VAL, strandp, scr1)		\
+	.pushlocals							;\
+	add	strandp, ERPT_OFFSET_VAL + STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, scr1;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(0)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(1)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(2)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(3)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(4)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(5)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(6)]		/* clear word */;\
+	stx	%g0, [scr1 + DRAM_CONTENTS(7)]		/* clear word */;\
+	.poplocals
 /* END CSTYLED */
 
 /*
  * LDAU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	LDAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LDAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label)\
 	.pushlocals							;\
 	PRINT("LDAU DIAG flush line\r\n")				;\
 	CPU_PUSH(erpt, scr4, scr5, scr6)				;\
-	CPU_STRUCT(cpup)			/* cpu pointer */	;\
-	add	cpup, CPU_UE_RPT, cpup		/* UE error report */	;\
-	ldx	[cpup + CPU_EVBSC_L2_AFAR(BNUM)], cpup			;\
-	/* %g1 (cpup) has error address (PA) */				;\
+	STRAND_STRUCT(strand)			/* strand pointer */	;\
+	add	strand, STRAND_UE_RPT, strand	/* UE error report */	;\
+	ldx	[strand + STRAND_EVBSC_L2_AFAR(BNUM)], strand		;\
+	/* %g1 (strand) has error address (PA) */			;\
 	HVCALL(l2_flush_line)	/* flush the l2$ line */		;\
 	CPU_POP(erpt, scr4, scr5, scr6)					;\
-	CPU_STRUCT(cpup)						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	STRAND_STRUCT(strand)						;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue to send pkts: guest, vbsc */	;\
 	ba,a	sendnr_ue_resume_exit_label				;\
@@ -1206,21 +1221,16 @@ lbl/**/pass:
  * LDWU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	LDWU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LDWU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label) \
 	.pushlocals							;\
 	PRINT("LDWU DIAG\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	CPU_STRUCT(cpup)						;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	STRAND_STRUCT(strand)						;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue to send pkts: guest, vbsc */	;\
 	ba,a	sendnr_ue_resume_exit_label				;\
@@ -1234,7 +1244,7 @@ lbl/**/pass:
  * Fatal Error. We probably won't get to run when this happens
  */
 /* BEGIN CSTYLED */
-#define	LRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				 \
 	PRINT("LRU DIAG\r\n")						;\
 	/* return to UE handler epilogue */				;\
@@ -1246,7 +1256,7 @@ lbl/**/pass:
  * Fatal Error. We probably won't get to run when this happens
  */
 /* BEGIN CSTYLED */
-#define	LVU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LVU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				 \
 	PRINT("LVU DIAG\r\n")						;\
 	ba,a	sendnr_ue_resume_exit_label
@@ -1256,20 +1266,15 @@ lbl/**/pass:
  * DAU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	DAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	DAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				 \
 	/* Clear DAU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
 	/* XXX diag data */						;\
 	PRINT("DAU DIAG\r\n")						;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue */				;\
 	ba,a	sendnr_ue_resume_exit_label
@@ -1279,20 +1284,15 @@ lbl/**/pass:
  * LDRU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	LDRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LDRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label)\
 	.pushlocals							;\
 	PRINT("LDRU DIAG\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue */				;\
 	ba,a	sendnr_ue_resume_exit_label				;\
@@ -1305,19 +1305,14 @@ lbl/**/pass:
  * DRU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	DRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	DRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				 \
 	/* Clear DRU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
 	PRINT("DRU DIAG\r\n")						;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue */				;\
 	ba,a	sendnr_ue_resume_exit_label
@@ -1327,20 +1322,15 @@ lbl/**/pass:
  * LDSU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	LDSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	LDSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label)\
 	.pushlocals							;\
 	PRINT("LDSU DIAG\r\n")						;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue */				;\
 	ba,a	sendnr_ue_resume_exit_label				;\
@@ -1352,19 +1342,14 @@ lbl/**/pass:
  * DSU: precise UE handler
  */
 /* BEGIN CSTYLED */
-#define	DSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+#define	DSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		ue_senddiag_resume_exit_label)				 \
 	/* Clear DSU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
 	PRINT("DSU DIAG\r\n")						;\
-	SET_ERPT_EDESC_EATTR(CPU_UE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_UE_RPT, EATTR_MEM,			 \
 		EDESC_PRECISE_NONRESUMABLE, scr4, scr5, scr6)		;\
 	/* return to UE handler epilogue */				;\
 	ba,a	ue_senddiag_resume_exit_label
@@ -1375,7 +1360,7 @@ lbl/**/pass:
  * Send a diagnostic error report.
  */
 /* BEGIN CSTYLED */
-#define	JUST_L2_MEU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6,	 \
+#define	JUST_L2_MEU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6,	 \
 		scr7, ue_resume_exit_label)				 \
 	PRINT("dis JUST_L2_MEU\r\n")					;\
 	ba,a	ue_resume_exit_label
@@ -1386,74 +1371,74 @@ lbl/**/pass:
  * All registers %g1-%g7 are used.
  */
 /* BEGIN CSTYLED */
-#define	PROCESS_UE_IN_L2_ESR(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6,	 \
+#define	PROCESS_UE_IN_L2_ESR(BNUM, strand, erpt, l2esr, scr4, scr5, scr6,	 \
 		scr7, sendnr_ue_resume_exit_label,			 \
 		ue_senddiag_resume_exit_label,				 \
 		ue_resume_exit_label)					 \
 	.pushlocals							;\
 	PRINT("PROCESS UE\r\n")						;\
-	CPU_ERPT_STRUCT(CPU_UE_RPT, cpup, erpt)	/* cpu, erpt pointer */	;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(BNUM)], l2esr			;\
+	STRAND_ERPT_STRUCT(STRAND_UE_RPT,strand, erpt)	/* strand, erpt pointer */	;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(BNUM)], l2esr		;\
 	/* l2esr has L2 ESR value */					;\
 	setx	L2_ESR_LDAU, scr5, scr4		/* LDAU */		;\
 	btst	scr4, l2esr			/* LDAU? */		;\
 	bz	%xcc, 1f			/* no, goto 1 */	;\
 	nop								;\
-	LDAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LDAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label);\
 1:	setx	L2_ESR_DAU, scr5, scr4		/* DAU */		;\
 	btst	scr4, l2esr			/* DAU? */		;\
 	bz	%xcc, 2f			/* no, goto 2 */	;\
 	nop								;\
-	DAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	DAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				;\
 2:	setx	L2_ESR_LDWU, scr5, scr4		/* LDWU */		;\
 	btst	scr4, l2esr			/* LDWU? */		;\
 	bz	%xcc, 3f			/* no, goto 3 */	;\
 	nop								;\
-	LDWU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LDWU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label);\
 3:	setx	L2_ESR_LDRU, scr5, scr4		/* LDRU */		;\
 	btst	scr4, l2esr			/* LDRU? */		;\
 	bz	%xcc, 4f			/* no, goto 4 */	;\
 	nop								;\
-	LDRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LDRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label);\
 4:	setx	L2_ESR_LDSU, scr5, scr4		/* LDSU */		;\
 	btst	scr4, l2esr			/* LDSU? */		;\
 	bz	%xcc, 5f			/* no, goto 5 */	;\
 	nop								;\
-	LDSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LDSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label, ue_senddiag_resume_exit_label);\
 5:	setx	L2_ESR_LRU, scr5, scr4		/* LRU */		;\
 	btst	scr4, l2esr			/* LRU? */		;\
 	bz	%xcc, 6f			/* no, goto 6 */	;\
 	nop								;\
-	LRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				;\
 6:	setx	L2_ESR_DRU, scr5, scr4		/* DRU */		;\
 	btst	scr4, l2esr			/* DRU? */		;\
 	bz	%xcc, 7f			/* no, goto 7 */	;\
 	nop								;\
-	DRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	DRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				;\
 7:	setx	L2_ESR_DSU, scr5, scr4		/* DSU */		;\
 	btst	scr4, l2esr			/* DSU? */		;\
 	bz	%xcc, 8f			/* no, goto 8 */	;\
 	nop								;\
-	DSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	DSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		ue_senddiag_resume_exit_label)				;\
 8:	setx	L2_ESR_LVU, scr5, scr4		/* LVU */		;\
 	btst	scr4, l2esr			/* LVU? */		;\
 	bz	%xcc, 9f			/* no, goto 9 */	;\
 	nop								;\
-	LVU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
+	LVU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,	 \
 		sendnr_ue_resume_exit_label)				;\
 9:	setx	L2_ESR_MEU, scr5, scr4		/* MEU */		;\
 	btst	scr4, l2esr			/* MEU? */		;\
 	bz	%xcc, 0f			/* no, goto 0 */	;\
 	nop								;\
-	JUST_L2_MEU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+	JUST_L2_MEU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 		ue_resume_exit_label)					;\
 0:	nop								;\
 	PRINT("PROCESS UE END\r\n")					;\
@@ -1465,30 +1450,25 @@ lbl/**/pass:
  * Use CE error report buffer for dis_ues
  */
 /* BEGIN CSTYLED */
-#define	DIS_LDWU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+#define	DIS_LDWU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 			dis_ue_err_ret_label)				 \
 	PRINT("dis LDWU DIAG\r\n")					;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM,			 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM,			 \
 		EDESC_UE_RESUMABLE, scr4, scr5, scr6)			;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_LDRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+#define	DIS_LDRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 			dis_ue_err_ret_label, ue_resume_exit_label)	 \
 	.pushlocals							;\
 	PRINT("dis LDRU DIAG\r\n")					;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f/* we only send a pkt if line is dirty */;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label					;\
@@ -1498,20 +1478,15 @@ lbl/**/pass:
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_LDSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+#define	DIS_LDSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 			dis_ue_err_ret_label, ue_resume_exit_label)	 \
 	.pushlocals							;\
 	PRINT("dis LDSU DIAG\r\n")					;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	ldx	[strand+ STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label					;\
@@ -1521,20 +1496,15 @@ lbl/**/pass:
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_LDAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+#define	DIS_LDAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 			dis_ue_err_ret_label, ue_resume_exit_label)	 \
 	.pushlocals							;\
 	PRINT("dis LDAU DIAG\r\n")					;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	ldx	[cpup + CPU_L2_LINE_STATE], scr4			;\
+	ldx	[strand + STRAND_L2_LINE_STATE], scr4			;\
 	cmp	scr4, 1							;\
 	bne,pn	%xcc, 1f /* we only send a pkt if line is dirty */	;\
 	nop								;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	ba,a	dis_ue_err_ret_label					;\
 1:									;\
@@ -1543,57 +1513,42 @@ lbl/**/pass:
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_DRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+#define	DIS_DRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 			dis_ue_err_ret_label)				 \
 	/* Clear DRU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
 	PRINT("dis DRU DIAG\r\n")					;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_DSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+#define	DIS_DSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 			dis_ue_err_ret_label)				 \
 	/* Clear DSU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
 	PRINT("dis DSU DIAG\r\n")					;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label
 /* END CSTYLED */
 
 /* BEGIN CSTYLED */
-#define	DIS_DAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+#define	DIS_DAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 			dis_ue_err_ret_label)				 \
 	PRINT("dis DAU DIAG\r\n")					;\
 	/* Clear DAU from DRAM ESR */					;\
-	ldx	[erpt + CPU_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
+	ldx	[erpt + STRAND_EVBSC_DRAM_AFSR(BNUM)], scr4		;\
 	setx	DRAM_ESR_BASE + BNUM*DRAM_BANK_STEP, scr6, scr5		;\
 	stx	scr4, [scr5]	/* clear DRAM ESR */			;\
-	ldx	[erpt + CPU_EVBSC_L2_AFAR(BNUM)], scr4			;\
-	CPU_ERR_PA_TO_RA(cpup, scr4, scr4, scr5, scr6)			;\
-	stx	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_RA]		;\
-	mov	ERPT_MEM_SIZE, scr4					;\
-	st	scr4, [erpt + CPU_SUN4V_ERPT + ESUN4V_SZ]		;\
-	SET_ERPT_EDESC_EATTR(CPU_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
+	SET_ERPT_EDESC_EATTR(STRAND_CE_RPT, EATTR_MEM, EDESC_UE_RESUMABLE,	 \
 		scr4, scr5, scr6)					;\
 	/* return to UE handler epilogue */				;\
 	ba,a	dis_ue_err_ret_label
@@ -1604,7 +1559,7 @@ lbl/**/pass:
  * Send a diagnostic error report.
  */
 /* BEGIN CSTYLED */
-#define	DIS_JUST_L2_MEU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5,	 \
+#define	DIS_JUST_L2_MEU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5,	 \
 			scr6, scr7, ue_resume_exit_label)		 \
 	PRINT("dis JUST_L2_MEU\r\n")					;\
 	ba,a	ue_resume_exit_label
@@ -1613,71 +1568,71 @@ lbl/**/pass:
 /*
  * Macro to process disrupting UE errors in L2/DRAM
  * All %g1-%g7 registers are used.
- * The disrupting error logs are saved in cpu.ce_rpt.
+ * The disrupting error logs are saved in strand.ce_rpt.
  */
 /* BEGIN CSTYLED */
-#define	PROCESS_DIS_UE_IN_L2_ESR(BNUM, cpup, erpt, l2esr, scr4, scr5,	 \
+#define	PROCESS_DIS_UE_IN_L2_ESR(BNUM, strand, erpt, l2esr, scr4, scr5,	 \
 			scr6, scr7, dis_ue_err_ret_label,		 \
 			ue_resume_exit_label)				 \
 	.pushlocals							;\
 	PRINT("PROCESS DIS UE\r\n")					;\
-	CPU_ERPT_STRUCT(CPU_CE_RPT, cpup, erpt)	/* cpu pointer */	;\
-	ldx	[erpt + CPU_EVBSC_L2_AFSR(BNUM)], l2esr			;\
+	STRAND_ERPT_STRUCT(STRAND_CE_RPT, strand, erpt)	/* strand pointer */	;\
+	ldx	[erpt + STRAND_EVBSC_L2_AFSR(BNUM)], l2esr		;\
 	/* l2esr has L2 ESR value */					;\
 	setx	L2_ESR_LDAU, scr5, scr4		/* LDAU */		;\
 	btst	scr4, l2esr			/* LDAU? */		;\
 	bz	%xcc, 1f			/* no, goto 1 */	;\
 	nop								;\
-	DIS_LDAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+	DIS_LDAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 		dis_ue_err_ret_label, ue_resume_exit_label)		;\
 1:	setx	L2_ESR_DAU, scr5, scr4		/* DAU */		;\
 	btst	scr4, l2esr			/* DAU? */		;\
 	bz	%xcc, 2f			/* no, goto 2 */	;\
 	nop								;\
-	DIS_DAU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+	DIS_DAU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 		dis_ue_err_ret_label)					;\
 2:	setx	L2_ESR_LDWU, scr5, scr4		/* LDWU */		;\
 	btst	scr4, l2esr			/* LDWU? */		;\
 	bz	%xcc, 3f			/* no, goto 3 */	;\
 	nop								;\
-	DIS_LDWU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+	DIS_LDWU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 		dis_ue_err_ret_label)					;\
 3:	setx	L2_ESR_LDRU, scr5, scr4		/* LDRU */		;\
 	btst	scr4, l2esr			/* LDRU? */		;\
 	bz	%xcc, 4f			/* no, goto 4 */	;\
 	nop								;\
-	DIS_LDRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+	DIS_LDRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 		dis_ue_err_ret_label, ue_resume_exit_label)		;\
 4:	setx	L2_ESR_LDSU, scr5, scr4		/* LDSU */		;\
 	btst	scr4, l2esr			/* LDSU? */		;\
 	bz	%xcc, 5f			/* no, goto 5 */	;\
 	nop								;\
-	DIS_LDSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7,\
+	DIS_LDSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7,\
 		dis_ue_err_ret_label, ue_resume_exit_label)		;\
 5:	setx	L2_ESR_DRU, scr5, scr4		/* DRU */		;\
 	btst	scr4, l2esr			/* DRU? */		;\
 	bz	%xcc, 6f			/* no, goto 7 */	;\
 	nop								;\
-	DIS_DRU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+	DIS_DRU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 		dis_ue_err_ret_label)					;\
 6:	setx	L2_ESR_DSU, scr5, scr4		/* DSU */		;\
 	btst	scr4, l2esr			/* DSU? */		;\
 	bz	%xcc, 7f			/* no, goto 8 */	;\
 	nop								;\
-	DIS_DSU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5, scr6, scr7, \
+	DIS_DSU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5, scr6, scr7, \
 		dis_ue_err_ret_label)					;\
 7:	setx	L2_ESR_MEU, scr5, scr4		/* MEU */		;\
 	btst	scr4, l2esr			/* MEU? */		;\
 	bz	%xcc, 0f			/* no, goto 0 */	;\
 	nop								;\
-	DIS_JUST_L2_MEU_HANDLER(BNUM, cpup, erpt, l2esr, scr4, scr5,	 \
+	DIS_JUST_L2_MEU_HANDLER(BNUM, strand, erpt, l2esr, scr4, scr5,	 \
 		scr6, scr7, ue_resume_exit_label)			;\
 0:	.poplocals
 /* END CSTYLED */
 
 /*
  * Dump the DTLB entries into the erpt.diag_buf area
- * NOTE: cpup and erpt are input args.
+ * NOTE: strand and erpt are input args.
  *
  * There is no safe way of obtaining TLB information after an error has
  * occurred. Parity is still checked. We could end up in an error after error
@@ -1685,9 +1640,9 @@ lbl/**/pass:
  * in case of a TLB data parity error.
  */
 /* BEGIN CSTYLED */
-#define	DUMP_DTLB(cpup, erpt, reg3, reg4, reg5, reg6, reg7)		 \
+#define	DUMP_DTLB(strand, erpt, reg3, reg4, reg5, reg6, reg7)		 \
 	.pushlocals							;\
-	add	erpt, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
+	add	erpt, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
 	set	0, reg3				/* TLB entry = 0 */	;\
 1:	ldxa	[reg3] ASI_DTLB_TAG, reg6	/* tag */		;\
 	stx	reg6, [erpt + DIAG_BUF_DTLB + TLB_TAG] /* save tag */	;\
@@ -1703,7 +1658,7 @@ lbl/**/pass:
 
 /*
  * Dump the ITLB entries into the erpt.diag_buf area
- * NOTE: cpup and erpt are input args.
+ * NOTE: strand and erpt are input args.
  *
  * There is no safe way of obtaining TLB information after an error has
  * occurred. Parity is still checked. We could end up in an error after error
@@ -1711,9 +1666,9 @@ lbl/**/pass:
  * in case of a TLB data parity error.
  */
 /* BEGIN CSTYLED */
-#define	DUMP_ITLB(cpup, erpt, reg3, reg4, reg5, reg6, reg7)		 \
+#define	DUMP_ITLB(strand, erpt, reg3, reg4, reg5, reg6, reg7)		 \
 	.pushlocals							;\
-	add	erpt, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
+	add	erpt, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
 	set	0, reg3				/* TLB entry = 0 */	;\
 1:	ldxa	[reg3] ASI_ITLB_TAG, reg6	/* tag */		;\
 	stx	reg6, [erpt + DIAG_BUF_ITLB + TLB_TAG] /* save tag */	;\
@@ -1873,9 +1828,9 @@ lbl/**/pass:
 #define	CONSOLE_PRINT_TLB_DATA_2(x, reg1, reg2, reg3, reg4, reg5, reg6,	 \
 			reg7)						 \
 	.pushlocals							;\
-	CPU_STRUCT(reg6)			/* cpu pointer */	;\
-	add	reg6, CPU_UE_RPT, reg6		/* cpu.ue_rpt */	;\
-	add	reg6, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
+	STRAND_STRUCT(reg6)			/* strand pointer */	;\
+	add	reg6, STRAND_UE_RPT, reg6	/* strand.ue_rpt */	;\
+	add	reg6, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
 	add	reg6, 1024, reg6		/* after demap */	;\
 	PRINT(x)							;\
 1:	ldx	[reg6], reg1			/* tag */		;\
@@ -1885,9 +1840,9 @@ lbl/**/pass:
 	PRINTX(reg1)				/* print data */	;\
 	PRINT("\r\n")				/* newline */		;\
 	add	reg6, 0x10, reg6		/* next entry */	;\
-	CPU_STRUCT(reg1)			/* cpu pointer */	;\
-	add	reg1, CPU_UE_RPT, reg1					;\
-	add	reg1, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg1		;\
+	STRAND_STRUCT(reg1)			/* strand pointer */	;\
+	add	reg1, STRAND_UE_RPT, reg1				;\
+	add	reg1, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg1		;\
 	add	reg1, 0x400, reg1					;\
 	add	reg1, 0x400, reg1					;\
 	cmp	reg6, reg1						;\
@@ -1907,9 +1862,9 @@ lbl/**/pass:
 /* BEGIN CSTYLED */
 #define	CONSOLE_PRINT_TLB_DATA(x, reg1, reg2, reg3, reg4, reg5, reg6, reg7)\
 	.pushlocals							;\
-	CPU_STRUCT(reg6)			/* cpu pointer */	;\
-	add	reg6, CPU_UE_RPT, reg6		/* cpu.ue_rpt */	;\
-	add	reg6, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
+	STRAND_STRUCT(reg6)			/* strand pointer */	;\
+	add	reg6, STRAND_UE_RPT, reg6	/* cpu.ue_rpt */	;\
+	add	reg6, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
 	PRINT(x)							;\
 1:	ldx	[reg6], reg1			/* tag */		;\
 	PRINTX(reg1)				/* print tag */		;\
@@ -1918,38 +1873,36 @@ lbl/**/pass:
 	PRINTX(reg1)				/* print data */	;\
 	PRINT("\r\n")				/* newline */		;\
 	add	reg6, 0x10, reg6		/* next entry */	;\
-	CPU_STRUCT(reg1)			/* cpu pointer */	;\
-	add	reg1, CPU_UE_RPT, reg1					;\
-	add	reg1, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg1		;\
+	STRAND_STRUCT(reg1)			/* cpu pointer */	;\
+	add	reg1, STRAND_UE_RPT, reg1				;\
+	add	reg1, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg1		;\
 	add	reg1, 0x400, reg1					;\
 	cmp	reg6, reg1						;\
 	bnz	%xcc, 1b						;\
 	nop								;\
 	.poplocals
-/* BEGIN CSTYLED */
+/* END CSTYLED */
 #else
 #define	CONSOLE_PRINT_TLB_DATA(x, reg1, reg2, reg3, reg4, reg5, reg6, reg7)
 #endif
 
 /*
  * Dump the JBI and SSI error logs into the erpt.diag_buf area
- * NOTE: cpup and erpt are input args.
+ * NOTE: strand and erpt are input args.
  */
 /* BEGIN CSTYLED */
-#define	DUMP_JBI_SSI(cpup, erpt, reg3, reg4, reg5, reg6, reg7)		 \
-	add	erpt, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
+#define	DUMP_JBI_SSI(strandp, erpt, reg3, reg4, reg5, reg6, reg7)		 \
+	setx	JBI_ERR_LOG, reg3, reg4					;\
+	ldx	[reg4], reg5		/* reg5 = JBI_ERROR_LOG */	;\
+	stx	reg5, [erpt + STRAND_VBSC_ERPT + EVBSC_JBI_ERR_LOG]	;\
+	add	erpt, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, erpt /* diag buf */;\
 	setx	JBI_ERR_CONFIG, reg3, reg4				;\
 	ldx	[reg4], reg5		/* reg5 = JBI_ERR_CONFIG */	;\
 	stx	reg5, [erpt]		/* save JBI_ERR_CONFIG */	;\
-	add	erpt, 0x8, erpt		/* increment */			;\
-	setx	JBI_ERR_LOG, reg3, reg4					;\
-	ldx	[reg4], reg5		/* reg5 = JBI_ERROR_LOG */	;\
-	stx	reg5, [erpt]		/* save JBI_ERROR_LOG */	;\
-	add	erpt, 0x8, erpt		/* increment */			;\
 	setx	JBI_ERR_OVF, reg3, reg4					;\
 	ldx	[reg4], reg5		/* reg5 = JBI_ERROR_OVF */	;\
-	stx	reg5, [erpt]		/* save JBI_ERROR_OVF */	;\
-	add	erpt, 0x8, erpt		/* increment */			;\
+	stx	reg5, [erpt + JS_JBI_ERR_OVF]				;\
+	inc	JS_JBI_LOG_ENB, erpt					;\
 	setx	JBI_LOG_ENB, reg3, reg4					;\
 	ldx	[reg4], reg5		/* reg5 = JBI_LOG_ENB */	;\
 	stx	reg5, [erpt]		/* save JBI_LOG_ENB */		;\
@@ -2018,9 +1971,9 @@ lbl/**/pass:
 #ifdef NIAGARA_BRINGUP
 /* BEGIN CSTYLED */
 #define	CONSOLE_PRINT_JBI_SSI(x, reg1, reg2, reg3, reg4, reg5, reg6, reg7)\
-	CPU_STRUCT(reg6)			/* cpu pointer */	;\
-	add	reg6, CPU_UE_RPT, reg6		/* cpu.ue_rpt */	;\
-	add	reg6, CPU_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
+	STRAND_STRUCT(reg6)			/* cpu pointer */	;\
+	add	reg6, STRAND_UE_RPT, reg6	/* cpu.ue_rpt */	;\
+	add	reg6, STRAND_VBSC_ERPT + EVBSC_DIAG_BUF, reg6 /* diag buf */;\
 	PRINT(x)							;\
 	PRINT("  JBI_ERR_CONFIG:\t")					;\
 	ldx	[reg6], reg1						;\
@@ -2114,12 +2067,12 @@ lbl/**/pass:
 	LOCK_ADDR(CONFIG_SINGLE_STRAND_LOCK, scr1)	/* ->lock */	;\
 	SPINLOCK_EXIT(scr1)
 
-#define	SPINLOCK_IDLE_ALL_STRAND(cpup, scr1, scr2, scr3, scr4) \
+#define	SPINLOCK_IDLE_ALL_STRAND(strand, scr1, scr2, scr3, scr4) \
 	SPINLOCK_ENTER_SS_LOCK(scr1, scr2, scr3)			;\
-	IDLE_ALL_STRAND(cpup, scr1, scr2, scr3, scr4)
+	IDLE_ALL_STRAND(strand, scr1, scr2, scr3, scr4)
 
-#define	SPINLOCK_RESUME_ALL_STRAND(cpup, scr1, scr2, scr3, scr4) \
-	RESUME_ALL_STRAND(cpup, scr1, scr2, scr3, scr4)			;\
+#define	SPINLOCK_RESUME_ALL_STRAND(strand, scr1, scr2, scr3, scr4) \
+	RESUME_ALL_STRAND(strand, scr1, scr2, scr3, scr4)			;\
 	SPINLOCK_EXIT_SS_LOCK(scr1)
 /* END CSTYLED */
 
@@ -2151,40 +2104,50 @@ lbl/**/pass:
 /*
  * If TSTATE.GL == GL, we save GLOBALS[GL] -> cpu_globals[TL - 1]
  */
-#define	SAVE_UE_GLOBALS()				\
-	.pushlocals					;\
-	mov	ASI_HSCRATCHPAD, %asi			;\
-	stxa	%g1, [%g0 + HSCRATCH1] %asi		;\
-	CPU_STRUCT(%g1)					;\
-	stx	%g2, [%g1 + CPU_UE_TMP1]		;\
-	rdpr	%tstate, %g1				;\
-	srlx	%g1, TSTATE_GL_SHIFT, %g1		;\
-	and	%g1, TSTATE_GL_MASK, %g1		;\
-	rdpr	%gl, %g2				;\
-	cmp	%g1, %g2				;\
-	bne,pt %xcc, 2f					;\
-	nop						;\
-	CPU_STRUCT(%g1)					;\
-	ldx	[%g1 + CPU_UE_TMP1], %g2		;\
-	stx	%o0, [%g1 + CPU_UE_TMP1]		;\
-	stx	%o1, [%g1 + CPU_UE_TMP2]		;\
-	mov	%g1, %o0				;\
-	ldxa	[%g0 + HSCRATCH1] %asi, %g1		;\
-	rdpr	%tl, %o1				;\
-	sub	%o1, 1, %o1				;\
-	sllx	%o1, TRAPGLOBALS_SHIFT, %o1		;\
-	add	%o0, %o1, %o1				;\
-	stx	%g7, [%o1 + CPU_UE_GLOBALS + (7*8)]	;\
-	stx	%g6, [%o1 + CPU_UE_GLOBALS + (6*8)]	;\
-	stx	%g5, [%o1 + CPU_UE_GLOBALS + (5*8)]	;\
-	stx	%g4, [%o1 + CPU_UE_GLOBALS + (4*8)]	;\
-	stx	%g3, [%o1 + CPU_UE_GLOBALS + (3*8)]	;\
-	stx	%g2, [%o1 + CPU_UE_GLOBALS + (2*8)]	;\
-	stx	%g1, [%o1 + CPU_UE_GLOBALS + (1*8)]	;\
-	stx	%g0, [%o1 + CPU_UE_GLOBALS + (0*8)]	;\
-	ldx	[%o0 + CPU_UE_TMP2], %o1		;\
-	ldx	[%o0 + CPU_UE_TMP1], %o0		;\
-2:							;\
+#define	SAVE_UE_GLOBALS()					\
+	.pushlocals						;\
+	mov	ASI_HSCRATCHPAD, %asi				;\
+	/*							;\
+	 * We overwrite the STRAND scratchpad register then	;\
+	 * get the STRAND address from the VCPU struct		;\
+	 */							;\
+	stxa	%g1, [%g0 + HSCRATCH_STRAND_STRUCT] %asi	;\
+	VCPU_STRUCT(%g1)					;\
+	VCPU2STRAND_STRUCT(%g1, %g1)				;\
+	stx	%g2, [%g1 + STRAND_UE_TMP1]			;\
+	rdpr	%tstate, %g1					;\
+	srlx	%g1, TSTATE_GL_SHIFT, %g1			;\
+	and	%g1, TSTATE_GL_MASK, %g1			;\
+	rdpr	%gl, %g2					;\
+	cmp	%g1, %g2					;\
+	bne,pt %xcc, 2f						;\
+	nop							;\
+	VCPU_STRUCT(%g1)					;\
+	VCPU2STRAND_STRUCT(%g1, %g1)				;\
+	ldx	[%g1 + STRAND_UE_TMP1], %g2			;\
+	stx	%o0, [%g1 + STRAND_UE_TMP1]			;\
+	stx	%o1, [%g1 + STRAND_UE_TMP2]			;\
+	mov	%g1, %o0					;\
+	ldxa	[%g0 + HSCRATCH_STRAND_STRUCT] %asi, %g1	;\
+	rdpr	%tl, %o1					;\
+	sub	%o1, 1, %o1					;\
+	sllx	%o1, TRAPGLOBALS_SHIFT, %o1			;\
+	add	%o0, %o1, %o1					;\
+	stx	%g7, [%o1 + STRAND_UE_GLOBALS + (7*8)]		;\
+	stx	%g6, [%o1 + STRAND_UE_GLOBALS + (6*8)]		;\
+	stx	%g5, [%o1 + STRAND_UE_GLOBALS + (5*8)]		;\
+	stx	%g4, [%o1 + STRAND_UE_GLOBALS + (4*8)]		;\
+	stx	%g3, [%o1 + STRAND_UE_GLOBALS + (3*8)]		;\
+	stx	%g2, [%o1 + STRAND_UE_GLOBALS + (2*8)]		;\
+	stx	%g1, [%o1 + STRAND_UE_GLOBALS + (1*8)]		;\
+	stx	%g0, [%o1 + STRAND_UE_GLOBALS + (0*8)]		;\
+	ldx	[%o0 + STRAND_UE_TMP2], %o1			;\
+	ldx	[%o0 + STRAND_UE_TMP1], %o0			;\
+2:								;\
+	/* restore scratch back to strandp */			;\
+	VCPU_STRUCT(%g1)					;\
+	VCPU2STRAND_STRUCT(%g1, %g1)				;\
+	stxa	%g1, [%g0 + HSCRATCH_STRAND_STRUCT] %asi	;\
 	.poplocals
 
 /*
@@ -2194,7 +2157,7 @@ lbl/**/pass:
  */
 #define	RESTORE_UE_GLOBALS()				\
 	.pushlocals					;\
-	CPU_STRUCT(%g1)					;\
+	STRAND_STRUCT(%g1)				;\
 	rdpr	%gl, %g2				;\
 	rdpr	%tstate, %g1				;\
 	srlx	%g1, TSTATE_GL_SHIFT, %g1		;\
@@ -2202,34 +2165,30 @@ lbl/**/pass:
 	cmp	%g1, %g2				;\
 	bne,pt %xcc, 2f					;\
 	nop						;\
-	CPU_STRUCT(%g1)					;\
-	stx	%o0, [%g1 + CPU_UE_TMP1]		;\
-	stx	%o1, [%g1 + CPU_UE_TMP2]		;\
+	STRAND_STRUCT(%g1)				;\
+	stx	%o0, [%g1 + STRAND_UE_TMP1]		;\
+	stx	%o1, [%g1 + STRAND_UE_TMP2]		;\
 	mov	%g1, %o0				;\
 	rdpr	%tl, %o1				;\
 	sub	%o1, 1, %o1				;\
 	sllx	%o1, TRAPGLOBALS_SHIFT, %o1		;\
 	add	%o0, %o1, %o1				;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (0*8)], %g0	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (1*8)], %g1	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (2*8)], %g2	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (3*8)], %g3	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (4*8)], %g4	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (5*8)], %g5	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (6*8)], %g6	;\
-	ldx	[%o1 + CPU_UE_GLOBALS + (7*8)], %g7	;\
-	mov	ASI_HSCRATCHPAD, %asi			;\
-	stxa	%g1, [%g0 + HSCRATCH1] %asi		;\
-	CPU_STRUCT(%g1)					;\
-	ldx	[%g1 + CPU_UE_TMP2], %o1		;\
-	ldx	[%g1 + CPU_UE_TMP1], %o0		;\
-	ldxa	[%g0 + HSCRATCH1] %asi, %g1		;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (0*8)], %g0	;\
+	mov	%o1, %g1				;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (2*8)], %g2	;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (3*8)], %g3	;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (4*8)], %g4	;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (5*8)], %g5	;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (6*8)], %g6	;\
+	ldx	[%o1 + STRAND_UE_GLOBALS + (7*8)], %g7	;\
+	STRAND_STRUCT(%o0)				;\
+	ldx	[%o0 + STRAND_UE_TMP2], %o1		;\
+	ldx	[%o0 + STRAND_UE_TMP1], %o0		;\
+	ldx	[%g1 + STRAND_UE_GLOBALS + (1*8)], %g1	;\
 2:							;\
 	.poplocals
 
 /* END CSTYLED */
-
-
 
 #ifdef __cplusplus
 }

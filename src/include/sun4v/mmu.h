@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SUN4V_MMU_H
 #define	_SUN4V_MMU_H
 
-#pragma ident	"@(#)mmu.h	1.11	05/08/23 SMI"
+#pragma ident	"@(#)mmu.h	1.13	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,7 +107,7 @@ extern "C" {
 #define	MMU_FT_MISS		0x3
 #define	MMU_FT_INVALIDRA	0x4
 #define	MMU_FT_PRIV		0x5 /* access to priv page w/pstate.priv=0 */
-#define	MMU_FT_PROT		0x6 /* store to write-protected page */
+#define	MMU_FT_PROT		0x6 /* store to !write, access of !exec */
 #define	MMU_FT_NFO		0x7
 #define	MMU_FT_SO		0x8
 #define	MMU_FT_VARANGE		0x9
@@ -117,7 +117,8 @@ extern "C" {
 #define	MMU_FT_WATCHPOINT	0xd
 #define	MMU_FT_ALIGN		0xe
 #define	MMU_FT_PAGESIZE		0xf
-#define	MMU_FT_MULTIERR		-1	
+#define	MMU_FT_INVTSBENTRY	0x10
+#define	MMU_FT_MULTIERR		-1
 
 
 /*
@@ -147,6 +148,21 @@ extern "C" {
 	add	size, 13, size			;\
 	mov	1, scr				;\
 	sllx	scr, size, size
+/* END CSTYLED */
+
+
+/*
+ * Returns pageshift encoded in tte.  tte not modified.
+ * Illegal page sizes are handled without any extra checks.
+ *
+ * Pageshift is (13 + (n * 3))
+ */
+/* BEGIN CSTYLED */
+#define	TTE_SHIFT_NOCHECK(tte, shift, scr)	\
+	and	tte, TTE_SZ_MASK, shift		;\
+	add	shift, shift, scr		;\
+	add	shift, scr, shift		;\
+	add	shift, 13, shift
 /* END CSTYLED */
 
 

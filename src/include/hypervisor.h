@@ -42,17 +42,22 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _HYPERVISOR_H
 #define	_HYPERVISOR_H
 
-#pragma ident	"@(#)hypervisor.h	1.44	06/05/26 SMI"
+#pragma ident	"@(#)hypervisor.h	1.49	07/05/03 SMI"
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+
+#ifndef _HV_SAMPLE
+#include <platform/hypervisor.h>
 #endif
 
 /*
@@ -96,7 +101,7 @@ extern "C" {
 #define	CPU_QCONF		0x14
 #define	CPU_QINFO		0x15
 #define	CPU_MYID		0x16
-#define	CPU_STATE		0x17
+#define	CPU_GET_STATE		0x17
 #define	CPU_SET_RTBA		0x18
 #define	CPU_GET_RTBA		0x19
 
@@ -126,10 +131,8 @@ extern "C" {
 #define	CONS_READ		0x62
 #define	CONS_WRITE		0x63
 
-#if 1 /* Not in spec */
-#define	NVRAM_READ		0x70
-#define	NVRAM_WRITE		0x71
-#endif
+#define	SOFT_STATE_SET		0x70
+#define	SOFT_STATE_GET		0x71
 
 #define	TTRACE_BUF_CONF		0x90
 #define	TTRACE_BUF_INFO		0x91
@@ -145,6 +148,15 @@ extern "C" {
 #define	INTR_SETSTATE		0xa4
 #define	INTR_GETTARGET		0xa5
 #define	INTR_SETTARGET		0xa6
+
+#define	VINTR_GETCOOKIE	0xa7
+#define	VINTR_SETCOOKIE	0xa8
+#define	VINTR_GETVALID	0xa9
+#define	VINTR_SETVALID	0xaa
+#define	VINTR_GETSTATE	0xab
+#define	VINTR_SETSTATE	0xac
+#define	VINTR_GETTARGET	0xad
+#define	VINTR_SETTARGET	0xae
 
 /*
  * vPCI APIs (PCIe API group)
@@ -182,6 +194,25 @@ extern "C" {
 #define	MSI_MSG_GETVALID	0xd2
 #define	MSI_MSG_SETVALID	0xd3
 
+#define	LDC_TX_QCONF		0xe0
+#define	LDC_TX_QINFO		0xe1
+#define	LDC_TX_GET_STATE	0xe2
+#define	LDC_TX_SET_QTAIL	0xe3
+#define	LDC_RX_QCONF		0xe4
+#define	LDC_RX_QINFO		0xe5
+#define	LDC_RX_GET_STATE	0xe6
+#define	LDC_RX_SET_QHEAD	0xe7
+
+#define	LDC_IRQ_CPU		0xe8
+#define	LDC_SET_INO		0xe9
+
+#define	LDC_SET_MAP_TABLE	0xea
+#define	LDC_GET_MAP_TABLE	0xeb
+#define	LDC_COPY		0xec
+#define	LDC_MAPIN		0xed
+#define	LDC_UNMAP		0xee
+#define	LDC_REVOKE		0xef
+
 /*
  * Platform-specific APIs
  */
@@ -196,29 +227,6 @@ extern "C" {
 #define	SVC_SETSTATUS		0x83
 #define	SVC_CLRSTATUS		0x84
 #endif
-
-/*
- * Niagara-specific hcalls (Niagara Perf Regs API group)
- */
-#define	NIAGARA_GET_PERFREG	0x100	/* Get Niagara JBUS/DRAM perf reg */
-#define	NIAGARA_SET_PERFREG	0x101	/* Set Niagara JBUS/DRAM perf reg */
-
-/*
- * Niagara MMU statistics (Niagara Perf Regs API group)
- */
-#define	NIAGARA_MMUSTAT_CONF	0x102
-#define	NIAGARA_MMUSTAT_INFO	0x103
-
-/*
- * Niagara Crypto Service Request (Niagara Crypto API group)
- */
-#define	NCS_REQUEST		0x110
-
-/*
- * Fire-specific hcalls (Fire API group)
- */
-#define	FIRE_GET_PERFREG	0x120
-#define	FIRE_SET_PERFREG	0x121
 
 /* ----------------------------------- */
 
@@ -254,12 +262,17 @@ extern "C" {
 #define	API_GROUP_SUN4V		0x000
 #define	API_GROUP_CORE		0x001
 #define	API_GROUP_INTR		0x002
+#define	API_GROUP_SOFTSTATE	0x003
 #define	API_GROUP_PCI		0x100
 #define	API_GROUP_LDC		0x101
 #define	API_GROUP_SVC		0x102
 #define	API_GROUP_NCS		0x103
+#define	API_GROUP_RNG		0x104
 #define	API_GROUP_NIAGARA	0x200
 #define	API_GROUP_FIRE		0x201
+#define	API_GROUP_NIAGARA2	0x202
+#define	API_GROUP_NIAGARA2PIU	0x203
+#define	API_GROUP_NIAGARA2NIU	0x204
 #define	API_GROUP_DIAG		0x300
 
 #define	SUN4V_VERSION_INITIAL	1
@@ -271,25 +284,12 @@ extern "C" {
 #define	CPU_STATE_STOPPED	0x1	/* cpu not started */
 #define	CPU_STATE_RUNNING	0x2	/* cpu running guest code */
 #define	CPU_STATE_ERROR		0x3	/* cpu is in the error state */
-#define	CPU_STATE_LAST_PUBLIC	CPU_STATE_ERROR /* last valid state */
+#define	CPU_STATE_SUSPENDED	0x4 	/* cpu in suspend loop */
+#define	CPU_STATE_UNCONFIGURED	0x5 	/* cpu unconfigured from guest */
+#define	CPU_STATE_STOPPING	0x6	/* cpu transitioning to stopped state */
+#define	CPU_STATE_STARTING	0x7	/* cpu transitioning to running state */
+#define	CPU_STATE_LAST_PUBLIC	CPU_STATE_ERROR /* last state defined by API */
 
-/*
- * Niagara JBUS/DRAM performance register ID
- *
- * hcalls: NIAGARA_SET_PERFREG/NIAGARA_GET_PERFREG
- */
-#define	NIAGARA_PERFREG_JBUS_CTL	0x00
-#define	NIAGARA_PERFREG_JBUS_COUNT	0x01
-#define	NIAGARA_PERFREG_DRAM_CTL0	0x02
-#define	NIAGARA_PERFREG_DRAM_COUNT0	0x03
-#define	NIAGARA_PERFREG_DRAM_CTL1	0x04
-#define	NIAGARA_PERFREG_DRAM_COUNT1	0x05
-#define	NIAGARA_PERFREG_DRAM_CTL2	0x06
-#define	NIAGARA_PERFREG_DRAM_COUNT2	0x07
-#define	NIAGARA_PERFREG_DRAM_CTL3	0x08
-#define	NIAGARA_PERFREG_DRAM_COUNT3	0x09
-
-#define	NIAGARA_PERFREG_MAX		10
 
 /*
  * MMU constants
@@ -351,7 +351,6 @@ extern "C" {
  */
 #define	MACH_DESC_ALIGNMENT	0x10	/* 16-byte alignment */
 
-
 /*
  * Hypervisor call status codes
  */
@@ -371,6 +370,7 @@ extern "C" {
 #define	ENOTSUPPORTED	13	/* Function or request is not supported */
 #define	ENOMAP		14	/* No mapping found */
 #define	ETOOMANY	15	/* Hard resource limit exceeded */
+#define	ECHANNEL	16	/* Illegal LDC channel */
 
 /*
  * Hypervisor call return values
@@ -439,6 +439,62 @@ extern "C" {
 #define	MONDO_DATA_ALIGNMENT	MONDO_DATA_SIZE
 
 #define	MIN_QUEUE_ENTRIES	2
+
+/*
+ * LDC flags and other arguments
+ */
+
+#define	LDC_QENTRY_SIZE_SHIFT	6
+#define	LDC_QENTRY_SIZE		(1<<LDC_QENTRY_SIZE_SHIFT)
+
+	/* Channel state */
+#define	LDC_CHANNEL_DOWN	0
+#define	LDC_CHANNEL_UP		1
+#define	LDC_CHANNEL_RESET	2
+
+	/* Map table constants */
+
+#define	LDC_MTE_SHIFT	4
+#define	LDC_MTE_SIZE	(1<<LDC_MTE_SHIFT)
+
+	/* Map permissions bits */
+
+#define	LDC_MAP_R_BIT		0
+#define	LDC_MAP_W_BIT		1
+#define	LDC_MAP_X_BIT		2
+#define	LDC_MAP_IOR_BIT		3
+#define	LDC_MAP_IOW_BIT		4
+#define	LDC_MAP_COPY_IN_BIT	5
+#define	LDC_MAP_COPY_OUT_BIT	6
+
+#define	LDC_MAP_R		(1<<LDC_MAP_R_BIT)
+#define	LDC_MAP_W		(1<<LDC_MAP_W_BIT)
+#define	LDC_MAP_X		(1<<LDC_MAP_X_BIT)
+#define	LDC_MAP_IOR		(1<<LDC_MAP_IOR_BIT)
+#define	LDC_MAP_IOW		(1<<LDC_MAP_IOW_BIT)
+#define	LDC_MAP_COPY_IN		(1<<LDC_MAP_COPY_IN_BIT)
+#define	LDC_MAP_COPY_OUT	(1<<LDC_MAP_COPY_OUT_BIT)
+
+#define	LDC_MAPIN_MASK	(LDC_MAP_R|LDC_MAP_W|LDC_MAP_X|LDC_MAP_IOR|LDC_MAP_IOW)
+
+
+/*
+ * NOTE: Implementation - copy flags are tested against permissions
+ * using: (perms & 1<<(flags+LDC_MAP_COPY_IN_BIT))
+ * So take care that COPY_* flags are consistent
+ */
+
+#define	LDC_COPY_IN	0x0	/* Copy data into guest from others exprtd pg */
+#define	LDC_COPY_OUT	0x1	/* Copy data out of guest to others exprtd pg */
+
+/*
+ * Guest Soft State
+ */
+#define	SIS_NORMAL		0x1
+#define	SIS_TRANSITION		0x2
+
+#define	SOFT_STATE_ALIGNMENT	0x20	/* 32 byte alignment */
+#define	SOFT_STATE_SIZE		0x20	/* 32 bytes */
 
 #ifdef __cplusplus
 }

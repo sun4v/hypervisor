@@ -42,14 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SUN4V_ERRS_DEFS_H
 #define	_SUN4V_ERRS_DEFS_H
 
-#pragma ident	"@(#)errs_defs.h	1.1	06/05/30 SMI"
+#pragma ident	"@(#)errs_defs.h	1.3	07/05/03 SMI"
 
 /*
  * sun4v cpu/memory error report definitions
@@ -66,14 +66,19 @@ struct sun4v_cpu_erpt {
 	uint64_t	g_stick;	/* %stick to guest */
 	uint32_t	edesc;		/* error descriptor */
 	uint32_t	attr;		/* error attribute */
-	uint64_t	ra;		/* real address */
+	uint64_t	addr;		/* address */
 	uint32_t	sz;		/* size */
 	uint16_t	g_cpuid;	/* CPU ID */
 	uint16_t	g_secs;		/* shutdown grace time in seconds */
-	uint64_t	word5;		/* filler */
-	uint64_t	word6;		/* filler */
+	uint8_t		asi;		/* ASI value */
+	uint8_t		rsvd;		/* filler */
+	uint16_t	reg;		/* REG */
+	uint32_t	word6;		/* filler */
 	uint64_t	word7;		/* filler */
+	uint64_t	word8;		/* filler */
 };
+
+typedef struct sun4v_cpu_erpt sun4v_cpu_erpt_t;
 
 #endif /* ASM */
 

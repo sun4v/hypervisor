@@ -42,16 +42,14 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)mmu.s	1.38	06/05/23 SMI"
-
-	.file	"mmu.s"
+	.ident	"@(#)mmu.s	1.45	07/05/03 SMI"
 
 /*
- * Niagara startup code
+ * Niagara mmu code
  */
 
 #include <sys/asm_linkage.h>
@@ -62,21 +60,22 @@
 #include <sun4v/traps.h>
 #include <sun4v/mmu.h>
 #include <mmustat.h>
+#include <cpu_errs.h>
 
 #include <guest.h>
 #include <offsets.h>
 #include <debug.h>
 #include <util.h>
 
-
-	! %g1	cpup
+	! %g1	vcpup
 	! %g2	8k-aligned real addr from tag access
 	ENTRY_NP(rdmmu_miss)
 	! offset handling
 	! XXX if hypervisor access then panic instead of watchdog_guest
-	IN_RANGE(%g1, %g2, %g3,
-		GUEST_MEM_BASE, GUEST_MEM_OFFSET, GUEST_MEM_SIZE,
-		1f, %g4, %g6)
+	VCPU2GUEST_STRUCT(%g1, %g7)
+	set	8 KB, %g5
+	RA2PA_RANGE_CONV(%g7, %g2, %g5, 1f, %g4, %g3)
+	!	%g3	PA
 
 	! tte valid, cp, writable, priv
 	mov	1, %g2
@@ -104,39 +103,45 @@
 	stxa	%g3, [%g2]ASI_DTLB_DATA_IN
 	retry
 
+	
 .rdmmu_miss_not_found:
 1:
-	!! %g2 real address
+	! FIXME: This test to be subsumed when we fix the RA mappings
+	! for multiple RA blocks
+	! %g1 guest struct
+	! %g2 real address
+	set	GUEST_LDC_MAPIN_BASERA, %g7
+	ldx	[ %g1 + %g7 ], %g3
+	subcc	%g2, %g3, %g4
+	bneg,pn	%xcc, 2f
+	  nop
+	set	GUEST_LDC_MAPIN_SIZE, %g5
+	ldx	[ %g1 + %g5 ], %g6
+	subcc	%g4, %g6, %g0
+		! check regs passed in to mapin_ra:
+	bneg,pt %xcc, ldc_dmmu_mapin_ra
+	  nop
+
+	ENTRY_NP(rdmmu_miss_not_found2)
+2:
 	LEGION_GOT_HERE
 	mov	MMU_FT_INVALIDRA, %g1
 	ba,pt	%xcc, revec_dax	! (%g1=ft, %g2=addr, %g3=ctx)
 	mov	0, %g3
 	SET_SIZE(rdmmu_miss)
 
-	! %g1	cpup
-	! %g2	8k-aligned real addr from tag access
+	!
+	! %g1 = vcpup
+	!
 	ENTRY_NP(rimmu_miss)
+	mov	MMU_TAG_ACCESS, %g2
+	ldxa	[%g2]ASI_IMMU, %g2	/* tag access */
+	set	((1 << 13) - 1), %g3
+	andn	%g2, %g3, %g2
 
-#if 1
-	! offset handling
-	! XXX if hypervisor access then panic instead of watchdog_guest
-	ldx	[%g1 + CPU_GUEST], %g1
-	ldx	[%g1 + GUEST_MEM_OFFSET], %g3
-	add	%g2, %g3, %g2
-	ldx	[%g1 + GUEST_MEM_BASE], %g3
-	ldx	[%g1 + GUEST_MEM_SIZE], %g4
-	cmp	%g2, %g3
-	blu,pn	%xcc, 1f
-	add	%g3, %g4, %g3
-	cmp	%g2, %g3
-	bgeu,pn	%xcc, 1f
-	mov	%g2, %g1
-#else
-	! offset handling
-	ldx	[%g1 + CPU_GUEST], %g1
-	ldx	[%g1 + GUEST_MEM_OFFSET], %g1
-	add	%g2, %g1, %g1
-#endif
+	VCPU2GUEST_STRUCT(%g1, %g3)
+	RA2PA_RANGE_CONV(%g3, %g2, %g0, 1f, %g4, %g1)
+	! %g1	PA
 
 	! tte valid, cp, writable, priv
 	mov	1, %g2
@@ -148,12 +153,13 @@
 	retry
 
 1:
-	!! %g2 real address
+	! %g2 real address
 	LEGION_GOT_HERE
 	mov	MMU_FT_INVALIDRA, %g1
 	ba,pt	%xcc, revec_iax	! (%g1=ft, %g2=addr, %g3=ctx)
 	mov	0, %g3
 	SET_SIZE(rimmu_miss)
+
 
 	/*
 	 * Normal tlb miss handlers
@@ -172,9 +178,9 @@
 	ldxa	[%g0]ASI_IMMU, %g3	/* tag target */
 	srlx	%g3, TAGTRG_CTX_RSHIFT, %g4	/* ctx from tag target */
 
-	!! %g1 = CPU pointer
-	!! %g3 = tag target
-	!! %g4 = ctx
+	! %g1 = CPU pointer
+	! %g3 = tag target
+	! %g4 = ctx
 
 .checkitsb0:
 	! for context != 0 and unshared TSB, that ctx == TSB ctx
@@ -214,14 +220,14 @@
 	! if TSB desc. specifies xor of TSB index, do it here
 	ldda	[%g5]ASI_QUAD_LDD, %g6	/* g6 = tag, g7 = data */
 	cmp	%g6, %g2
-	bne,pn	%xcc, .itsbmiss		! tag mismatch
+	bne,pn	%xcc, .checkipermmaps	! tag mismatch
 	nop
-	brgez,pn %g7, .itsbmiss		! TTE valid?
+	brgez,pn %g7, .checkipermmaps	! TTE valid?
 	nop
 
 .itsbhit:
 	! extract sz from tte
-	TTE_SIZE(%g7, %g4, %g3, .itsbmiss) ! XXX fault not just a miss
+	TTE_SIZE(%g7, %g4, %g3, .itsb_inv_pgsz)
 	btst	TTE_X, %g7	! must check X bit for IMMU
 	bz,pn	%icc, .itsbmiss
 	sub	%g4, 1, %g5	! %g5 page mask
@@ -232,21 +238,22 @@
 	sllx	%g3, 13, %g3	! %g3 real address
 	xor	%g7, %g3, %g7	! %g7 orig tte with ra field zeroed
 	andn	%g3, %g5, %g3
-	ldx	[%g1 + CPU_GUEST], %g6
-	RANGE_CHECK(%g6, %g3, %g4, .itsbmiss, %g5) ! XXX fault not just a miss
-	REAL_OFFSET(%g6, %g3, %g3, %g4)
+
+	VCPU2GUEST_STRUCT(%g1, %g6)
+	RA2PA_RANGE_CONV_UNK_SIZE(%g6, %g3, %g4, .itsb_ra_range, %g5, %g1) ! XXX fault not just a miss
+	mov	%g1, %g3
+	VCPU_STRUCT(%g1)		! restore vcpu
+
 	or	%g7, %g3, %g7	! %g7 new tte with pa
 
-	mov	1, %g5
-	sllx	%g5, NI_TTE4V_L_SHIFT, %g5
-	andn	%g7, %g5, %g7	! %g7 tte (force clear lock bit)
+	CLEAR_TTE_LOCK_BIT(%g7, %g5)
 
 	set	TLB_IN_4V_FORMAT, %g5	! %g5 sun4v-style tte selection
 	stxa	%g7, [%g5]ASI_ITLB_DATA_IN
-	!!
-	!! %g1 = CPU pointer
-	!! %g7 = TTE
-	!!
+	!
+	! %g1 = CPU pointer
+	! %g7 = TTE
+	!
 	ldx	[%g1 + CPU_MMUSTAT_AREA], %g6
 	brnz,pn	%g6, 1f
 	nop
@@ -257,11 +264,11 @@
 	rd	%tick, %g2
 	ldx	[%g1 + CPU_SCR0], %g1
 	sub	%g2, %g1, %g5
-	!!
-	!! %g5 = %tick delta
-	!! %g6 = MMU statistics area
-	!! %g7 = TTE
-	!!
+	!
+	! %g5 = %tick delta
+	! %g6 = MMU statistics area
+	! %g7 = TTE
+	!
 	inc	MMUSTAT_I, %g6			/* stats + i */
 	ldxa	[%g0]ASI_IMMU, %g3		/* tag target */
 	srlx	%g3, TAGTRG_CTX_RSHIFT, %g4	/* ctx from tag target */
@@ -279,14 +286,80 @@
 	stx	%g3, [%g6 + MMUSTAT_HIT]
 	retry
 
+	! %g1 = CPU struct
+	! %g4 = context
+.checkipermmaps:
+	brnz,pt	%g4, .itsbmiss		! only context zero has perm mappings
+	  nop
+	VCPU2GUEST_STRUCT(%g1, %g2)
+	mov	GUEST_PERM_MAPPINGS_INCR*(NPERMMAPPINGS-1), %g3
+	add	%g3, GUEST_PERM_MAPPINGS, %g3
+	add	%g2, %g3, %g2
+	mov	-(GUEST_PERM_MAPPINGS_INCR*(NPERMMAPPINGS-1)), %g3
+	rdpr	%tpc, %g4
+1:
+	ldda	[ %g2 + %g3 ] ASI_QUAD_LDD, %g6		! Ld TTE (g7) + Tag (g6)
+
+	! Figure page size match mask
+	! FIXME: Could speed this by storing the mask ... but
+	! atomicity problems with storage. Other option is
+	! store pre-computed page size shift in tag bits 0-13
+	brgez,pn %g7, 2f
+	and	%g7, TTE_SZ_MASK, %g5
+	add	%g5, %g5, %g1
+	add	%g5, %g1, %g1		! Mult size by 3
+	add	%g1, 13, %g1		! Add 13
+	mov	1, %g5
+	sllx	%g5, %g1, %g5		! Compute bytes per page
+	sub	%g5, 1, %g5		! Page mask for TTE retrieved
+	
+	xor	%g6, %g4, %g6
+	andncc	%g6, %g5, %g0		! Check for tag match
+
+	beq,pt %xcc, 3f
+	  nop
+
+2:
+	brlz,pt %g3, 1b
+	  add	%g3, GUEST_PERM_MAPPINGS_INCR, %g3
+
+	VCPU_STRUCT(%g1)
+	ba,pt	%xcc, .itsbmiss
+	  mov	%g0, %g4
+
+3:
+	! Found a matching entry - can we load it into the ITLB
+	VCPU_STRUCT(%g1)
+	add	%g2, %g3, %g2	! Ptr to map entry
+
+	! Calculate index into perm bit set
+	ldub	[%g1 + CPU_VID], %g3
+	and	%g3, MAPPING_XWORD_MASK, %g4
+	mov	1, %g5
+	sllx	%g5, %g4, %g4	! Bit in mask
+	srlx	%g3, MAPPING_XWORD_SHIFT, %g3
+	sllx	%g3, MAPPING_XWORD_BYTE_SHIFT_BITS, %g3
+	add	%g2, %g3, %g2
+
+	ldx	[%g2 + MAPPING_ICPUSET], %g3
+	btst	%g3, %g4
+	bz,pn	%xcc, .itsbmiss
+	  mov	%g0, %g4
+
+	! Stuff entry - it's already been swizzled
+	set	TLB_IN_4V_FORMAT, %g5	! %g5 sun4v-style tte selection
+	stxa	%g7, [%g5]ASI_ITLB_DATA_IN
+
+	retry
+
 .itsbmiss:
 	ldx	[%g1 + CPU_MMU_AREA], %g2
 	brz,pn	%g2, watchdog_guest
 	.empty
 
-	!! %g1 is CPU pointer
-	!! %g2 is MMU Fault Status Area
-	!! %g4 is context (possibly shifted - still OK for zero test)
+	! %g1 is CPU pointer
+	! %g2 is MMU Fault Status Area
+	! %g4 is context (possibly shifted - still OK for zero test)
 	/* if ctx == 0 and ctx0 set TSBs used, take slow trap */
 	/* if ctx != 0 and ctxnon0 set TSBs used, take slow trap */
 	mov	CPU_NTSBS_CTXN, %g7
@@ -307,12 +380,12 @@
 	stx	%g4, [%g2 + MMU_FAULT_AREA_IADDR]
 	stx	%g5, [%g2 + MMU_FAULT_AREA_ICTX]
 	/* fast misses do not update MMU_FAULT_AREA_IFT with MMU_FT_FASTMISS */
-	! wrpr	%g0, FAST_IMMU_MISS_TT, %tt	/* already set */
+	! wrpr	%g0, TT_FAST_IMMU_MISS, %tt	/* already set */
 	rdpr	%pstate, %g3
 	or	%g3, PSTATE_PRIV, %g3
 	wrpr	%g3, %pstate
 	rdpr	%tba, %g3
-	add	%g3, (FAST_IMMU_MISS_TT << TT_OFFSET_SHIFT), %g3
+	add	%g3, (TT_FAST_IMMU_MISS << TT_OFFSET_SHIFT), %g3
 7:
 	rdpr	%tl, %g2
 	cmp	%g2, 1	/* trap happened at tl=0 */
@@ -335,21 +408,46 @@
 	 */
 	mov	MMU_TAG_TARGET, %g3
 	ldxa	[%g3]ASI_IMMU, %g3	/* tag target */
-	srlx	%g3, 48, %g3
+	srlx	%g3, TAGTRG_CTX_RSHIFT, %g3
 	stx	%g3, [%g2 + MMU_FAULT_AREA_ICTX]
 	rdpr	%tpc, %g4
 	stx	%g4, [%g2 + MMU_FAULT_AREA_IADDR]
 	mov	MMU_FT_MISS, %g4
 	stx	%g4, [%g2 + MMU_FAULT_AREA_IFT]
-	wrpr	%g0, IMMU_MISS_TT, %tt
+	wrpr	%g0, TT_IMMU_MISS, %tt
 	rdpr	%pstate, %g3
 	or	%g3, PSTATE_PRIV, %g3
 	wrpr	%g3, %pstate
 	rdpr	%tba, %g3
-	add	%g3, (IMMU_MISS_TT << TT_OFFSET_SHIFT), %g3
+	add	%g3, (TT_IMMU_MISS << TT_OFFSET_SHIFT), %g3
 	ba,a	7b
 	.empty
+
+.itsb_inv_pgsz:
+	/* IAX with FT=Invalid Page Size (15), VA, CTX */
+	ba,pt	%xcc, .itsb_iax
+	mov	MMU_FT_PAGESIZE, %g3
+
+.itsb_ra_range:
+	/* IAX with FT=Invalid TSB Entry (16), VA, CTX */
+	mov	MMU_FT_INVTSBENTRY, %g3
+	/*FALLTHROUGH*/
+
+.itsb_iax:
+	!! %g1 = cpup
+	ldx	[%g1 + CPU_MMU_AREA], %g2
+	brz,pn	%g2, watchdog_guest		! Nothing we can do about this
+	nop
+	stx	%g3, [%g2 + MMU_FAULT_AREA_IFT]
+	mov	MMU_TAG_TARGET, %g3
+	ldxa	[%g3]ASI_IMMU, %g3	/* tag target */
+	srlx	%g3, TAGTRG_CTX_RSHIFT, %g3
+	stx	%g3, [%g2 + MMU_FAULT_AREA_ICTX]
+	rdpr	%tpc, %g3
+	stx	%g3, [%g2 + MMU_FAULT_AREA_IADDR]
+	REVECTOR(TT_IAX)
 	SET_SIZE(immu_miss)
+
 
 	/* %g1 contains per CPU area */
 	ENTRY_NP(dmmu_miss)
@@ -358,9 +456,9 @@
 	ldxa	[%g0]ASI_DMMU, %g3	/* tag target */
 	srlx	%g3, TAGTRG_CTX_RSHIFT, %g4	/* ctx from tag target */
 
-	!! %g1 = CPU pointer
-	!! %g3 = tag target
-	!! %g4 = ctx
+	! %g1 = CPU pointer
+	! %g3 = tag target
+	! %g4 = ctx
 
 .checkdtsb0:
 	! for context != 0 and unshared TSB, that ctx == TSB ctx
@@ -400,14 +498,14 @@
 	! if TSB desc. specifies xor of TSB index, do it here
 	ldda	[%g5]ASI_QUAD_LDD, %g6	/* g6 = tag, g7 = data */
 	cmp	%g6, %g2
-	bne,pn	%xcc, .dtsbmiss		! tag mismatch
+	bne,pn	%xcc, .checkdpermmaps		! tag mismatch
 	nop
-	brgez,pn %g7, .dtsbmiss		! TTE valid
+	brgez,pn %g7, .checkdpermmaps		! TTE valid
 	nop
 
 .dtsbhit:
 	! extract sz from tte
-	TTE_SIZE(%g7, %g4, %g3, .dtsbmiss) ! XXX fault not just a miss
+	TTE_SIZE(%g7, %g4, %g3, .dtsb_inv_pgsz)
 	sub	%g4, 1, %g5	! %g5 page mask
 
 	! extract ra from tte
@@ -417,31 +515,31 @@
 	xor	%g7, %g3, %g7	! %g7 orig tte with ra field zeroed
 	andn	%g3, %g5, %g3
 	ldx	[%g1 + CPU_GUEST], %g6
-	!! %g1 cpu struct
-	!! %g2 --
-	!! %g3 raddr
-	!! %g4 page size
-	!! %g5 --
-	!! %g6 guest struct
-	!! %g7 TTE ready for pa
-	RANGE_CHECK(%g6, %g3, %g4, 3f, %g5)
-	REAL_OFFSET(%g6, %g3, %g3, %g4)
+
+
+	! %g1 cpu struct
+	! %g2 --
+	! %g3 raddr
+	! %g4 page size
+	! %g5 --
+	! %g6 guest struct
+	! %g7 TTE ready for pa
+	RA2PA_RANGE_CONV_UNK_SIZE(%g6, %g3, %g4, 3f, %g5, %g2)
+	mov	%g2, %g3		! %g3	PA
 4:
-	!! %g1 cpu struct
-	!! %g3 raddr
-	!! %g7 TTE ready for pa
+	! %g1 cpu struct
+	! %g3 paddr
+	! %g7 TTE ready for pa
 	or	%g7, %g3, %g7	! %g7 new tte with pa
 
-	mov	1, %g5
-	sllx	%g5, NI_TTE4V_L_SHIFT, %g5
-	andn	%g7, %g5, %g7	! %g7 tte (force clear lock bit)
+	CLEAR_TTE_LOCK_BIT(%g7, %g5)
 
 	set	TLB_IN_4V_FORMAT, %g5	! %g5 sun4v-style tte selection
 	stxa	%g7, [%g5]ASI_DTLB_DATA_IN
-	!!
-	!! %g1 = CPU pointer
-	!! %g7 = TTE
-	!!
+	!
+	! %g1 = CPU pointer
+	! %g7 = TTE
+	!
 	ldx	[%g1 + CPU_MMUSTAT_AREA], %g6
 	brnz,pn	%g6, 1f
 	nop
@@ -452,11 +550,11 @@
 	rd	%tick, %g2
 	ldx	[%g1 + CPU_SCR0], %g1
 	sub	%g2, %g1, %g5
-	!!
-	!! %g5 = %tick delta
-	!! %g6 = MMU statistics area
-	!! %g7 = TTE
-	!!
+	!
+	! %g5 = %tick delta
+	! %g6 = MMU statistics area
+	! %g7 = TTE
+	!
 	inc	MMUSTAT_D, %g6			/* stats + d */
 	ldxa	[%g0]ASI_DMMU, %g3		/* tag target */
 	srlx	%g3, TAGTRG_CTX_RSHIFT, %g4	/* ctx from tag target */
@@ -473,14 +571,16 @@
 	inc	%g3
 	stx	%g3, [%g6 + MMUSTAT_HIT]
 	retry
+
+
 3:
-	!! %g1 cpu struct
-	!! %g2 --
-	!! %g3 raddr
-	!! %g4 page size
-	!! %g5 --
-	!! %g6 guest struct
-	!! %g7 TTE ready for pa
+	! %g1 cpu struct
+	! %g2 --
+	! %g3 raddr
+	! %g4 page size
+	! %g5 --
+	! %g6 guest struct
+	! %g7 TTE ready for pa
 	! check for IO address
 	! branch back to 4b with pa in %g3
 	! must preserve %g1 and %g7
@@ -488,16 +588,109 @@
 	    .dmmu_miss_io_not_found, %g2, %g5)
 .dmmu_miss_io_found:
 	ba,a	4b
+	  nop
+
+	! %g1 cpu struct
+	! %g2 --
+	! %g3 raddr
+	! %g4 page size
+	! %g5 --
+	! %g6 guest struct
+	! %g7 TTE ready for pa
 .dmmu_miss_io_not_found:
+	! Last chance - check the LDC mapin area
+	ldx	[ %g6 + GUEST_LDC_MAPIN_BASERA ], %g5
+	subcc	%g3, %g5, %g5
+	bneg,pn	%xcc, .dtsb_ra_range
+	  nop
+	ldx	[ %g6 + GUEST_LDC_MAPIN_SIZE ], %g2
+	subcc	%g5, %g2, %g0
+	bneg,pt	%xcc, ldc_dtsb_hit
+	  nop
+
+		/* fall thru */
+
+	ENTRY_NP(dtsb_miss)
+
+	! %g1 = CPU struct
+	! %g4 = context
+.checkdpermmaps:
+	brnz,pt	%g4, .dtsbmiss		! only context zero has perm mappings
+	  nop
+	VCPU2GUEST_STRUCT(%g1, %g2)
+	mov	GUEST_PERM_MAPPINGS_INCR*(NPERMMAPPINGS-1), %g3
+	add	%g3, GUEST_PERM_MAPPINGS, %g3
+	add	%g2, %g3, %g2
+	mov	-(GUEST_PERM_MAPPINGS_INCR*(NPERMMAPPINGS-1)), %g3
+
+	mov	MMU_TAG_ACCESS, %g4
+	ldxa	[%g4]ASI_DMMU, %g4	/* tag access */
+	set	(NCTXS - 1), %g5
+	andn	%g4, %g5, %g4
+
+1:
+	ldda	[ %g2 + %g3 ] ASI_QUAD_LDD, %g6		! Ld TTE (g7) + Tag (g6)
+
+	! Figure page size match mask
+	! FIXME: Could speed this by storing the mask ... but
+	! atomicity problems with storage. Other option is
+	! store pre-computed page size shift in tag bits 0-13
+	brgez,pn %g7, 2f
+	and	%g7, TTE_SZ_MASK, %g5
+	add	%g5, %g5, %g1
+	add	%g5, %g1, %g1		! Mult size by 3
+	add	%g1, 13, %g1		! Add 13
+	mov	1, %g5
+	sllx	%g5, %g1, %g5		! Compute bytes per page
+	sub	%g5, 1, %g5		! Page mask for TTE retrieved
+	
+	xor	%g6, %g4, %g6
+	andncc	%g6, %g5, %g0		! Check for tag match
+
+	beq,pt %xcc, 3f
+	  nop
+
+2:
+	brlz,pt %g3, 1b
+	  add	%g3, GUEST_PERM_MAPPINGS_INCR, %g3
+
+	VCPU_STRUCT(%g1)
+	ba,pt	%xcc, .dtsbmiss
+	  mov	%g0, %g4
+
+3:
+	! Found a matching entry - can we load it into the DTLB
+	VCPU_STRUCT(%g1)
+	add	%g2, %g3, %g2	! Ptr to map entry
+
+	! Calculate index into perm bit set
+	ldub	[%g1 + CPU_VID], %g3
+	and	%g3, MAPPING_XWORD_MASK, %g4
+	mov	1, %g5
+	sllx	%g5, %g4, %g4	! Bit in mask
+	srlx	%g3, MAPPING_XWORD_SHIFT, %g3
+	sllx	%g3, MAPPING_XWORD_BYTE_SHIFT_BITS, %g3
+	add	%g2, %g3, %g2
+
+	ldx	[%g2 + MAPPING_DCPUSET], %g3
+	btst	%g3, %g4
+	bz,pn	%xcc, .dtsbmiss
+	  mov	%g0, %g4
+
+	! Stuff entry - it's already been swizzled
+	set	TLB_IN_4V_FORMAT, %g5	! %g5 sun4v-style tte selection
+	stxa	%g7, [%g5]ASI_DTLB_DATA_IN
+
+	retry
 
 .dtsbmiss:
 	ldx	[%g1 + CPU_MMU_AREA], %g2
 	brz,pn	%g2, watchdog_guest
 	.empty
 
-	!! %g1 is CPU pointer
-	!! %g2 is MMU Fault Status Area
-	!! %g4 is context (possibly shifted - still OK for zero test)
+	! %g1 is CPU pointer
+	! %g2 is MMU Fault Status Area
+	! %g4 is context (possibly shifted - still OK for zero test)
 	/* if ctx == 0 and ctx0 set TSBs used, take slow trap */
 	/* if ctx != 0 and ctxnon0 set TSBs used, take slow trap */
 	mov	CPU_NTSBS_CTXN, %g7
@@ -518,12 +711,12 @@
 	stx	%g4, [%g2 + MMU_FAULT_AREA_DADDR]
 	stx	%g5, [%g2 + MMU_FAULT_AREA_DCTX]
 	/* fast misses do not update MMU_FAULT_AREA_DFT with MMU_FT_FASTMISS */
-	! wrpr	%g0, FAST_DMMU_MISS_TT, %tt	/* already set */
+	! wrpr	%g0, TT_FAST_DMMU_MISS, %tt	/* already set */
 	rdpr	%pstate, %g3
 	or	%g3, PSTATE_PRIV, %g3
 	wrpr	%g3, %pstate
 	rdpr	%tba, %g3
-	add	%g3, (FAST_DMMU_MISS_TT << TT_OFFSET_SHIFT), %g3
+	add	%g3, (TT_FAST_DMMU_MISS << TT_OFFSET_SHIFT), %g3
 7:
 	rdpr	%tl, %g2
 	cmp	%g2, 1 /* trap happened at tl=0 */
@@ -553,14 +746,39 @@
 	stx	%g5, [%g2 + MMU_FAULT_AREA_DCTX]
 	mov	MMU_FT_MISS, %g4
 	stx	%g4, [%g2 + MMU_FAULT_AREA_DFT]
-	wrpr	%g0, DMMU_MISS_TT, %tt
+	wrpr	%g0, TT_DMMU_MISS, %tt
 	rdpr	%pstate, %g3
 	or	%g3, PSTATE_PRIV, %g3
 	wrpr	%g3, %pstate
 	rdpr	%tba, %g3
-	add	%g3, (DMMU_MISS_TT << TT_OFFSET_SHIFT), %g3
+	add	%g3, (TT_DMMU_MISS << TT_OFFSET_SHIFT), %g3
 	ba,a	7b
 	.empty
+
+.dtsb_inv_pgsz:
+	/* DAX with FT=Invalid Page Size (15), VA, CTX */
+	ba,pt	%xcc, .dtsb_dax
+	mov	MMU_FT_PAGESIZE, %g3
+
+.dtsb_ra_range:
+	/* DAX with FT=Invalid TSB Entry (16), VA, CTX */
+	mov	MMU_FT_INVTSBENTRY, %g3
+	/*FALLTHROUGH*/
+
+.dtsb_dax:
+	!! %g1 = cpup
+	ldx	[%g1 + CPU_MMU_AREA], %g2
+	brz,pn	%g2, watchdog_guest		! Nothing we can do about this
+	nop
+	stx	%g3, [%g2 + MMU_FAULT_AREA_DFT]
+	mov	MMU_TAG_ACCESS, %g3
+	ldxa	[%g3]ASI_DMMU, %g3	/* tag access */
+	set	(NCTXS - 1), %g5
+	andn	%g3, %g5, %g4
+	and	%g3, %g5, %g5
+	stx	%g4, [%g2 + MMU_FAULT_AREA_DADDR]
+	stx	%g5, [%g2 + MMU_FAULT_AREA_DCTX]
+	REVECTOR(TT_DAX)
 	SET_SIZE(dmmu_miss)
 
 	/* %g2 contains guest's miss info pointer (hv phys addr) */
@@ -585,12 +803,12 @@
 	stx	%g4, [%g2 + MMU_FAULT_AREA_DADDR]
 	stx	%g5, [%g2 + MMU_FAULT_AREA_DCTX]
 	/* fast misses do not update MMU_FAULT_AREA_DFT with MMU_FT_FASTPROT */
-	wrpr	%g0, FAST_PROT_TT, %tt	/* already set? XXXQ */
+	wrpr	%g0, TT_FAST_DMMU_PROT, %tt	/* already set? XXXQ */
 	rdpr	%pstate, %g3
 	or	%g3, PSTATE_PRIV, %g3
 	wrpr	%g3, %pstate
 	rdpr	%tba, %g3
-	add	%g3, (FAST_PROT_TT << TT_OFFSET_SHIFT), %g3
+	add	%g3, (TT_FAST_DMMU_PROT << TT_OFFSET_SHIFT), %g3
 
 	rdpr	%tl, %g2
 	cmp	%g2, 1 /* trap happened at tl=0 */
@@ -646,6 +864,7 @@
 	stxa	%g0, [%g0]ASI_ITSB_CONFIG_CTXN
 	SET_SIZE(set_dummytsb_ctxN)
 
+
 	ENTRY_NP(dmmu_err)
 	/*
 	 * TLB parity errors can cause normal MMU traps (N1 PRM
@@ -656,29 +875,13 @@
 	set	(SPARC_ESR_DMDU | SPARC_ESR_DMSU), %g2	! is it a dmdu/dmsu err
 	btst	%g2, %g1
 	bnz	%xcc, ue_err			! err handler takes care of it
-	rdhpr	%htstate, %g1
-	btst	HTSTATE_HPRIV, %g1
-	bnz,pn	%xcc, badtrap
-	rdpr	%pstate, %g1
-	or	%g1, PSTATE_PRIV, %g1
-	wrpr	%g1, %pstate
-	rdpr	%tba, %g1
-	rdpr	%tt, %g2
-	sllx	%g2, 5, %g2
-	add	%g1, %g2, %g1
-	rdpr	%tl, %g3
-	cmp	%g3, MAXPTL
-	bgu,pn	%xcc, watchdog_guest
-	clr	%g2
-	cmp	%g3, 1
-	movne	%xcc, 1, %g2
-	sllx	%g2, 14, %g2
+	.empty
 
-	CPU_STRUCT(%g3)
+	VCPU_STRUCT(%g3)
 	ldx	[%g3 + CPU_MMU_AREA], %g3
 	brz,pn	%g3, watchdog_guest		! Nothing we can do about this
 	.empty
-	!! %g3 - MMU_FAULT_AREA
+	! %g3 - MMU_FAULT_AREA
 
 	/*
 	 * Update MMU_FAULT_AREA_DATA
@@ -696,18 +899,18 @@
 	and	%g5, %g6, %g5
 	stx	%g5, [%g3 + MMU_FAULT_AREA_DCTX]
 
-	rdpr	%tt, %g5
-	cmp	%g5, TT_DAX
-	bne,pn	%xcc, 2f
+	rdpr	%tt, %g1
+	cmp	%g1, TT_DAX
+	bne,pn	%xcc, 3f
 	mov	MMU_FT_MULTIERR, %g6 ! unknown FT or multiple bits
 
-	!! %g4 - sfsr
+	! %g4 - sfsr
 	srlx	%g4, MMU_SFSR_FT_SHIFT, %g5
 	andcc	%g5, MMU_SFSR_FT_MASK, %g5
-	bz,pn	%xcc, 1f
+	bz,pn	%xcc, 2f
 	nop
-	!! %g5 - fault type
-	!! %g6 - sun4v ft
+	! %g5 - fault type
+	! %g6 - sun4v ft
 	andncc	%g5, MMU_SFSR_FT_PRIV, %g0
 	movz	%xcc, MMU_FT_PRIV, %g6 ! priv is only bit set
 	andncc	%g5, MMU_SFSR_FT_SO, %g0
@@ -720,11 +923,10 @@
 	movz	%xcc, MMU_FT_NFO, %g6	! nfo is only bit set
 	andncc	%g5, (MMU_SFSR_FT_VARANGE | MMU_SFSR_FT_VARANGE2), %g0
 	movz	%xcc, MMU_FT_VARANGE, %g6 ! varange are only bits set
-1:	stx	%g6, [%g3 + MMU_FAULT_AREA_DFT]
-2:	mov	HPSTATE_GUEST, %g3
-	jmp	%g1 + %g2
-	wrhpr	%g3, %hpstate	! keep ENB bit
+2:	stx	%g6, [%g3 + MMU_FAULT_AREA_DFT]
+3:	REVECTOR(%g1)
 	SET_SIZE(dmmu_err)
+
 
 	ENTRY_NP(immu_err)
 	/*
@@ -739,25 +941,14 @@
 	rdhpr	%htstate, %g1
 	btst	HTSTATE_HPRIV, %g1
 	bnz,pn	%xcc, badtrap
-	rdpr	%pstate, %g1
-	or	%g1, PSTATE_PRIV, %g1
-	wrpr	%g1, %pstate
-	rdpr	%tba, %g1
-	rdpr	%tt, %g2
-	sllx	%g2, 5, %g2
-	add	%g1, %g2, %g1
-	rdpr	%tl, %g3
-	cmp	%g3, MAXPTL
-	bgu,pn	%xcc, watchdog_guest
-	clr	%g2
-	cmp	%g3, 1
-	movne	%xcc, 1, %g2
-	sllx	%g2, 14, %g2
-	CPU_STRUCT(%g3)
+	.empty
+
+	VCPU_STRUCT(%g3)
 	ldx	[%g3 + CPU_MMU_AREA], %g3
 	brz,pn	%g3, watchdog_guest	! Nothing we can do about this
 	nop
-	!! %g3 - MMU_FAULT_AREA
+
+	! %g3 - MMU_FAULT_AREA
 	/* decode sfsr, update MMU_FAULT_AREA_INSTR */
 	rdpr	%tpc, %g4
 	stx	%g4, [%g3 + MMU_FAULT_AREA_IADDR]
@@ -767,103 +958,22 @@
 	movrnz	%g2, 0, %g5 ! primary ctx for TL=0, nucleus ctx for TL>0
 	stx	%g5, [%g3 + MMU_FAULT_AREA_ICTX]
 
-	!! %g6 - sun4v ft
+	! %g6 - sun4v ft
 	mov	MMU_FT_MULTIERR, %g6 ! unknown FT or multiple bits
 
 	mov	MMU_SFSR, %g5
 	ldxa	[%g5]ASI_IMMU, %g4 ! Capture SFSR
 	stxa	%g0, [%g5]ASI_IMMU ! Clear SFSR
-	!! %g4 - sfsr
+	! %g4 - sfsr
 	srlx	%g4, MMU_SFSR_FT_SHIFT, %g5
 	andcc	%g5, MMU_SFSR_FT_MASK, %g5
 	bz,pn	%xcc, 1f
 	nop
-	!! %g5 - fault type
+	! %g5 - fault type
 	andncc	%g5, MMU_SFSR_FT_PRIV, %g0
 	movz	%xcc, MMU_FT_PRIV, %g6 ! priv is only bit set
 	andncc	%g5, (MMU_SFSR_FT_VARANGE | MMU_SFSR_FT_VARANGE2), %g0
 	movz	%xcc, MMU_FT_VARANGE, %g6 ! varange are only bits set
 1:	stx	%g6, [%g3 + MMU_FAULT_AREA_IFT]
-	mov	HPSTATE_GUEST, %g3
-	jmp	%g1 + %g2
-	wrhpr	%g3, %hpstate	! keep ENB bit
+	REVECTOR(TT_IAX)
 	SET_SIZE(immu_err)
-
-
-/*
- * revec_dax - revector the current trap to the guest's DAX handler
- *
- * %g1 - fault type
- * %g2 - fault addr
- * %g3 - fault ctx
- */
-	ENTRY_NP(revec_dax)
-	CPU_STRUCT(%g4)
-	ldx	[%g4 + CPU_MMU_AREA], %g4
-	brz,pn	%g4, watchdog_guest
-	nop
-	stx	%g1, [%g4 + MMU_FAULT_AREA_DFT]
-	stx	%g2, [%g4 + MMU_FAULT_AREA_DADDR]
-	stx	%g3, [%g4 + MMU_FAULT_AREA_DCTX]
-
-	rdhpr	%htstate, %g1
-	btst	HTSTATE_HPRIV, %g1
-	bnz,pn	%xcc, badtrap
-	rdpr	%pstate, %g1
-	or	%g1, PSTATE_PRIV, %g1
-	wrpr	%g1, %pstate
-	rdpr	%tba, %g1
-	mov	TT_DAX, %g2
-	wrpr	%g2, 0, %tt
-	sllx	%g2, 5, %g2
-	add	%g1, %g2, %g1
-	rdpr	%tl, %g3
-	cmp	%g3, MAXPTL
-	bgu,pn	%xcc, watchdog_guest
-	clr	%g2
-	cmp	%g3, 1
-	movne	%xcc, 1, %g2
-	sllx	%g2, 14, %g2
-	mov	HPSTATE_GUEST, %g3
-	jmp	%g1 + %g2
-	wrhpr	%g3, %hpstate	! keep ENB bit
-	SET_SIZE(revec_dax)
-
-/*
- * revec_iax - revector the current trap to the guest's IAX handler
- *
- * %g1 - fault type
- * %g2 - fault addr
- * %g3 - fault ctx
- */
-	ENTRY_NP(revec_iax)
-	CPU_STRUCT(%g4)
-	ldx	[%g4 + CPU_MMU_AREA], %g4
-	brz,pn	%g4, watchdog_guest
-	nop
-	stx	%g1, [%g4 + MMU_FAULT_AREA_IFT]
-	stx	%g2, [%g4 + MMU_FAULT_AREA_IADDR]
-	stx	%g3, [%g4 + MMU_FAULT_AREA_ICTX]
-
-	rdhpr	%htstate, %g1
-	btst	HTSTATE_HPRIV, %g1
-	bnz,pn	%xcc, badtrap
-	rdpr	%pstate, %g1
-	or	%g1, PSTATE_PRIV, %g1
-	wrpr	%g1, %pstate
-	rdpr	%tba, %g1
-	mov	TT_IAX, %g2
-	wrpr	%g2, 0, %tt
-	sllx	%g2, 5, %g2
-	add	%g1, %g2, %g1
-	rdpr	%tl, %g3
-	cmp	%g3, MAXPTL
-	bgu,pn	%xcc, watchdog_guest
-	clr	%g2
-	cmp	%g3, 1
-	movne	%xcc, 1, %g2
-	sllx	%g2, 14, %g2
-	mov	HPSTATE_GUEST, %g3
-	jmp	%g1 + %g2
-	wrhpr	%g3, %hpstate	! keep ENB bit
-	SET_SIZE(revec_iax)

@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-	.ident	"@(#)hcalls.s	1.6	06/04/28 SMI"
+	.ident	"@(#)hcalls.s	1.7	07/04/22 SMI"
 
 	.file	"hcalls.s"
 
@@ -55,6 +55,22 @@
 #include <sys/stack.h>
 
 #include <hypervisor.h>
+
+#if defined(lint)
+/* ARGSUSED */
+int
+hv_core_trap(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+	     uint64_t a4, int func)
+{
+	return -1;
+}
+#else
+	ENTRY(hv_core_trap)
+	ta	CORE_TRAP
+	retl
+	addc	%g0, 0, %o0
+	SET_SIZE(hv_core_trap)
+#endif
 
 #if defined(lint)
 /* ARGSUSED */
@@ -88,6 +104,8 @@ hv_trap(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
 	SET_SIZE(hv_trap)
 #endif
 
+#if 0
+
 	ENTRY(soft_trap)
 	subcc	%g0, %g0, %g0
 	mov	%o0, %g1
@@ -120,3 +138,4 @@ hv_trap(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
 	nop
 	SET_SIZE(legion_debug)
 
+#endif

@@ -42,11 +42,11 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#pragma ident	"@(#)main.c	1.9	03/11/10 SMI"
+#pragma ident	"@(#)main.c	1.10	07/06/07 SMI"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -56,24 +56,26 @@
 
 #include <sample/sample.h>
 
-#define KB(n)	((n)*1024)
-#define MB(n)	((n)*KB(1024))
+#define	KB(n)	((n)*1024)
+#define	MB(n)	((n)*KB(1024))
 
 int
 main(uint64_t ra)
 {
+#if LEGION_DEBUG
 	int i;
 	char *p;
 	uint64_t va = ra;
-	(void)printf("Hello World RA BASE = %x\n", ra);
+#endif
+	(void) printf("Hello World RA BASE = %x\n", ra);
 
-#if 0
+#if LEGION_DEBUG
 	legion_debug(-1);
 	p = 0x80000000+MB(512);
 	*p = 0;
 #endif
 
-#if 0
+#if LEGION_DEBUG
 	for (i = 0x0; i < 0x80; i++) {
 		int rv;
 		printf("%x\n", i);
@@ -89,16 +91,15 @@ main(uint64_t ra)
 	map_daddr(va+K(0), ra+MB(0), K(64));
 	map_daddr(va+M(0), ra+MB(0), M(4));
 	map_daddr(va+MB(0), ra+MB(0), M(256));
-	
+
 	p = (char *)ra;
 
-	for (i = 0 ; i < MB(256)-1; i+= K(4)) {
+	for (i = 0; i < MB(256) - 1; i += K(4)) {
 		printf("VA = %x n = %x\n", &p[i], p[i]);
-		
 	}
 
 	while (1) { }
 #endif
 
-	return 0;
+	return (0);
 }

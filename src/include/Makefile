@@ -40,10 +40,10 @@
 # 
 # ========== Copyright Header End ============================================
 #
-# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"@(#)Makefile	1.3	06/05/10 SMI"
+# ident	"@(#)Makefile	1.5	07/07/17 SMI"
 #
 
 TOP = ../
@@ -53,9 +53,9 @@ PLATFORM = sun4v
 include $(TOP)/Makefile.master
 
 # Headers we install into the proto area
-HDRS =	hypervisor.h \
-	sun4v/asi.h sun4v/mmu.h sun4v/queue.h sun4v/traps.h sun4v/vpci.h \
-	sys/asm_linkage.h sys/htypes.h \
+HDRS =	hypervisor.h ncs_api.h \
+	sun4v/asi.h sun4v/instr.h sun4v/mmu.h sun4v/queue.h sun4v/traps.h \
+	sun4v/vpci.h sys/asm_linkage.h sys/htypes.h \
 	sample/sample.h \
 	md/md_impl.h
 

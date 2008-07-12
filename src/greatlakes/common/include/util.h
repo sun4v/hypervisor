@@ -42,18 +42,23 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _UTIL_H
 #define	_UTIL_H
 
-#pragma ident	"@(#)util.h	1.13	06/05/26 SMI"
+#pragma ident	"@(#)util.h	1.22	07/09/11 SMI"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <vcpu.h>
+#include <abort.h>
+#include <strand.h>
+#include <platform/util.h>
 
 /*
  * Size generation constants
@@ -69,48 +74,107 @@ extern "C" {
 #define	NS_PER_S	1000000000
 #define	MS_PER_NS	1000000
 
+/*
+ * L2$ line state
+ */
+#define	L2_LINE_CLEAN		0
+#define	L2_LINE_DIRTY		1
+#define	L2_LINE_INVALID		2
+#define	L2_LINE_NOT_FOUND	3
 
+/*
+ * prefetch function to invalidate an L2$ line
+ */
+#define	INVALIDATE_CACHE_LINE	0x18
 
 /* BEGIN CSTYLED */
 
 /*
- * CPU2GUEST_STRUCT - get the current guestp from a cpup
+ * VCPU2GUEST_STRUCT - get the current guestp from a vcpup
  *
  * Delay Slot: safe in a delay slot
- * Register overlap: cpu and root may be the same register
+ * Register overlap: vcpu and root may be the same register
  */
-#define	CPU2GUEST_STRUCT(cpu, guest)		\
-	ldx	[cpu + CPU_GUEST], guest
+#define	VCPU2GUEST_STRUCT(vcpu, guest)		\
+	ldx	[vcpu + CPU_GUEST], guest
+
+
+/* FIXME: do we ever use the following? */
+/*
+ * VCPU2ROOT_STRUCT - get the rootp from a vcpup
+ *
+ * Delay Slot: safe in a delay slot if vcpup is valid
+ * Register overlap: vcpu and root may be the same register
+ */
+#define	VCPU2ROOT_STRUCT(vcpu, root)		\
+	ldx	[vcpu + CPU_ROOT], root
 
 
 /*
- * CPU2ROOT_STRUCT - get the rootp from a cpup
+ * VCPU2STRAND_STRUCT - get the current strandp from a vcpup
  *
- * Delay Slot: safe in a delay slot if cpup is valid
- * Register overlap: cpu and root may be the same register
+ * Delay Slot: safe in a delay slot
+ * Register overlap: vcpu and strand may be the same register
  */
-#define	CPU2ROOT_STRUCT(cpu, root)		\
-	ldx	[cpu + CPU_ROOT], root
+#define	VCPU2STRAND_STRUCT(vcpu, strand)	\
+	ldx	[vcpu + CPU_STRAND], strand
 
+
+#define	HSCRATCH_STRAND_STRUCT	HSCRATCH0
+#define	HSCRATCH_VCPU_STRUCT	HSCRATCH1
+#define	SCRATCHPAD_MEMBAR	/* nothing for niagara */
 
 /*
- * CPU_STRUCT - get the current cpup from scratch
+ * VCPU_STRUCT - get the current vcpup from scratch
+ *
+ * Delay Slot: not safe in a delay slot
+ */
+#define	VCPU_STRUCT(vcpu)			\
+	mov	HSCRATCH_VCPU_STRUCT, vcpu	;\
+	ldxa	[vcpu]ASI_HSCRATCHPAD, vcpu
+
+/*
+ * SET_VCPU_STRUCT - set the vcpup into scratch
+ */
+#define	SET_VCPU_STRUCT(vcpu, scr1)		\
+	mov	HSCRATCH_VCPU_STRUCT, scr1	;\
+	stxa	vcpu, [scr1]ASI_HSCRATCHPAD	;\
+	SCRATCHPAD_MEMBAR
+
+/*
+ * STRAND_STRUCT - get the current strandp from scratch
+ *
+ * Delay Slot: not safe in a delay slot
+ */
+#define	STRAND_STRUCT(strand)			\
+	mov	HSCRATCH_STRAND_STRUCT, strand	;\
+	ldxa	[strand]ASI_HSCRATCHPAD, strand
+
+/*
+ * SET_STRAND_STRUCT - set the strandp into scratch
+ */
+#define	SET_STRAND_STRUCT(strand, scr1)		\
+	mov	HSCRATCH_STRAND_STRUCT, scr1	;\
+	stxa	strand, [scr1]ASI_HSCRATCHPAD	;\
+	SCRATCHPAD_MEMBAR
+
+/*
+ * STRAND2CONFIG_STRUCT - get the current configp from strandp
+ */
+#define	STRAND2CONFIG_STRUCT(strand, configp)	\
+	ldx	[strand + STRAND_CONFIGP], configp
+
+/*
+ * CONFIG_STRUCT - get the current configp from scratch
  *
  * Delay Slot: safe in a delay slot
  */
-#define	CPU_STRUCT(cpu)				\
-	mov	HSCRATCH0, cpu			;\
-	ldxa	[cpu]ASI_HSCRATCHPAD, cpu
+#define	CONFIG_STRUCT(configp)			\
+	STRAND_STRUCT(configp)			;\
+	STRAND2CONFIG_STRUCT(configp, configp)
 
-/*
- * ROOT_STRUCT - get the current rootp from scratch
- *
- * Delay Slot: safe in a delay slot
- */
-#define	ROOT_STRUCT(root)			\
-	CPU_STRUCT(root)			;\
-	ldx	[root + CPU_ROOT], root
-
+	/* For the moment alias */
+#define	ROOT_STRUCT(configp)	CONFIG_STRUCT(configp)
 
 /*
  * LOCK_ADDR - get the lock address from scratch
@@ -118,20 +182,20 @@ extern "C" {
  * Delay Slot: not safe in a delay slot
  */
 #define	LOCK_ADDR(LOCK, addr)			\
-	ROOT_STRUCT(addr)			;\
+	CONFIG_STRUCT(addr)			;\
 	inc	LOCK, addr
 
 
 /*
- * CPU_GUEST_STRUCT - get both the current cpup and guestp from scratch
+ * VCPU_GUEST_STRUCT - get both the current vcpup and guestp from scratch
  *
- * Delay Slot: safe in a delay slot
- * Register overlap: if cpu and guest are the same then only the guest
+ * Delay Slot: not safe in a delay slot
+ * Register overlap: if vcpu and guest are the same then only the guest
  *     is returned, see GUEST_STRUCT
  */
-#define	CPU_GUEST_STRUCT(cpu, guest)		\
-	CPU_STRUCT(cpu)				;\
-	CPU2GUEST_STRUCT(cpu, guest)
+#define	VCPU_GUEST_STRUCT(vcpu, guest)		\
+	VCPU_STRUCT(vcpu)			;\
+	VCPU2GUEST_STRUCT(vcpu, guest)
 
 
 /*
@@ -140,66 +204,72 @@ extern "C" {
  * Delay Slot: safe in a delay slot
  */
 #define	GUEST_STRUCT(guest)			\
-	CPU_GUEST_STRUCT(guest, guest)
+	VCPU_GUEST_STRUCT(guest, guest)
 
 
 /*
- * PID2CPUP - convert physical cpu number to a pointer to the physical
- * cpu structure.
+ * CTRL_DOMAIN - returns the service domain guest structure ptr
  *
- * Register overlap: pid and cpup may be the same register.
- * Delay Slot: safe in a delay slot
+ * Delay Slot: Safe in a delay slot
  */
-#define	PID2CPUP(pid, cpup, scr1)			\
-	set	CPU_SIZE, scr1				;\
-	mulx	pid, scr1, cpup				;\
-	ROOT_STRUCT(scr1)				;\
-	ldx	[scr1 + CONFIG_CPUS], scr1		;\
-	add	scr1, cpup, cpup
+#define	CTRL_DOMAIN(guestp, scr1, scr2)	\
+	CONFIG_STRUCT(scr1)					;\
+	ldx	[scr1 + CONFIG_HVCTL_LDC], scr2			;\
+	mulx    scr2, LDC_ENDPOINT_SIZE, scr2			;\
+	ldx	[scr1 + CONFIG_HV_LDCS], guestp			;\
+	add	guestp, scr2, guestp				;\
+	ldx	[guestp + LDC_TARGET_GUEST], guestp 		
 
 /*
- * VCPUID2CPUP - convert virtual cpu number to a pointer to the current
- * physical cpu struct
+ * PID2CPUP - convert physical cpu number to a pointer to the vcpu
+ * cpu structure thats currently running on it.
+ * FIXME: This needs removing .. including all uses
+ * because it's just rubbish!
+ */
+#define	PID2VCPUP(pid, cpup, scr1, scr2)		\
+	.pushlocals					;\
+	mov	%g0, scr2				;\
+1:							;\
+	cmp	scr2, (NVCPUS - 1)			;\
+	bg,a	2f					;\
+	  mov	%g0, cpup				;\
+	set	VCPU_SIZE, scr1				;\
+	mulx	scr2, scr1, cpup			;\
+	CONFIG_STRUCT(scr1)				;\
+	ldx	[scr1 + CONFIG_VCPUS], scr1		;\
+	add	scr1, cpup, cpup			;\
+	VCPU2STRAND_STRUCT(cpup, scr1)			;\
+	ldub	[scr1 + STRAND_ID], scr1		;\
+	cmp	scr1, pid				;\
+	bne,a	%icc, 1b				;\
+	  inc	scr2					;\
+2:							;\
+	.poplocals
+
+
+/* the VCPUID2CPUP macro below assumes the array step is 8 */
+#if GUEST_VCPUS_INCR != 8
+#error "GUEST_VCPUS_INCR is not 8"
+#endif
+
+#define	GUEST_VCPUS_SHIFT	3
+
+/*
+ * VCPUID2CPUP - convert a guest virtual cpu number to a pointer
+ * to the corresponding virtual cpu struct
  *
  * Register overlap: vcpuid and cpup may be the same register
  * Delay Slot: safe in a delay slot
  */
 #define	VCPUID2CPUP(guestp, vcpuid, cpup, fail_label, scr1)	\
-	cmp	vcpuid, NCPUS				;\
+	cmp	vcpuid, NVCPUS				;\
 	bgeu,pn	%xcc, fail_label			;\
-	sllx	vcpuid, 3, cpup				;\
+	sllx	vcpuid, GUEST_VCPUS_SHIFT, cpup		;\
 	set	GUEST_VCPUS, scr1			;\
 	add	cpup, scr1, cpup			;\
 	ldx	[guestp + cpup], cpup			;\
 	brz,pn	cpup, fail_label			;\
 	nop
-
-/* the above macro assumes the array step is 8 */
-#if GUEST_VCPUS_INCR != 8
-#error "GUEST_VCPUS_INCR is not 8"
-#endif
-
-/*
- * VCOREID2COREP - convert virtual core number to a pointer to the
- * current physical core struct
- *
- * Register overlap: vcoreid and corep may be the same register
- * Delay Slot: safe in a delay slot
- */
-#define	VCOREID2COREP(guestp, vcoreid, corep, fail_label, scr1)	\
-	cmp	vcoreid, NCORES				;\
-	bgeu,pn	%xcc, fail_label			;\
-	sllx	vcoreid, 3, corep			;\
-	set	GUEST_VCORES, scr1			;\
-	add	corep, scr1, corep			;\
-	ldx	[guestp + corep], corep			;\
-	brz,pn	corep, fail_label			;\
-	nop
-
-/* the above macro assumes the array step is 8 */
-#if GUEST_VCORES_INCR != 8
-#error "GUEST_VCORES_INCR is not 8"
-#endif
 
 
 /*
@@ -213,25 +283,6 @@ extern "C" {
 
 
 /*
- * CPU2CORE_STRUCT - obtain core pointer from cpu pointer
- *
- * Register overlap: cpu and core may be the same register
- * Delay Slot: safe in a delay slot
- */
-#define	CPU2CORE_STRUCT(cpu, core)		\
-	ldx	[cpu + CPU_CORE], core
-
-/*
- * CORE_STRUCT - obtain core pointer
- *
- * Delay Slot: safe in a delay slot
- */
-#define	CORE_STRUCT(core)			\
-	CPU_STRUCT(core)			;\
-	CPU2CORE_STRUCT(core, core)
-
-
-/*
  * Standard return-from-hcall with status "errno"
  */
 #define	HCALL_RET(errno)			\
@@ -240,6 +291,7 @@ extern "C" {
 
 /*
  * HVCALL - make a subroutine call
+ * HVJMP - jmp to subroutine in reg
  * HVRET - return from a subroutine call
  *
  * This hypervisor has a convention of using %g7 as the the
@@ -249,46 +301,58 @@ extern "C" {
 	ba,pt	%xcc, x				;\
 	rd	%pc, %g7
 
+#define	HVJMP(reg, pc)				\
+	jmpl	reg, pc				;\
+	nop
+
 #define	HVRET					\
 	jmp	%g7 + SZ_INSTR			;\
 	nop
 
 /*
- * CPU Stack operations
+ * Strand stack operations
  *
- * CPU_PUSH - push a val into the stack
- * CPU_POP - pop val from the stack
+ * These macros are deprecated, but aliased for back compatibility
+ *	CPU_PUSH - push a val into the stack
+ *	CPU_POP - pop val from the stack
+ * These macros temporarily push and pop values that need storing
+ *	STRAND_PUSH - push a val into the stack
+ *	STRAND_POP - pop val from the stack
  *
  */
+
 #define CPU_PUSH(val, scr1, scr2, scr3)					\
-	CPU_STRUCT(scr1)						;\
-	set	TOP, scr2						;\
-	ldx	[scr1 + scr2], scr2	/* get top of stack*/		;\
-	add	scr2, STACK_VAL_INCR, scr2	/* next element */	;\
-	set	CPU_STACK + STACK_VAL, scr3	/* is stack full? */	;\
-	add	scr3, scr1, scr3					;\
-	add	scr3, ENDOFSTACK, scr3					;\
-	cmp	scr2, scr3						;\
-	bge,a	%xcc, hvabort						;\
-	mov	ABORT_STACK_OVERFLOW, %g1				;\
-	set	TOP, scr3						;\
-	stx	scr2, [scr1 + scr3]					;\
-	stx	val, [scr2]
-	
+	STRAND_PUSH(val, scr1, scr2)
 
 #define	CPU_POP(val, scr1, scr2, scr3)					\
-	CPU_STRUCT(scr1)						;\
-	set	TOP, scr2						;\
-	ldx	[scr1 + scr2], scr2	/* get top of stack */		;\
-	ldx	[scr2], val		/* get top element */ 		;\
-	sub	scr2, STACK_VAL_INCR, scr2	/* dec stack */		;\
-	set	CPU_STACK + STACK_VAL_INCR, scr3			;\
-	add	scr1, scr3, scr3		/* begining of stack */	;\
-	cmp	scr2, scr3						;\
-	blu,a	%xcc, hvabort						;\
-	mov	ABORT_STACK_UNDERFLOW, %g1				;\
-	set	TOP, scr3		/* set new top */		;\
-	stx	scr2, [scr1 + scr3]
+	STRAND_POP(val, scr1)
+
+	/* Stack is empty if ptr = 0 */
+
+#define STRAND_PUSH(val, scr1, scr2)					\
+	STRAND_STRUCT(scr1)						;\
+	add	scr1, STRAND_MINI_STACK, scr1				;\
+	ldx	[scr1 + MINI_STACK_PTR], scr2	/* get stack ptr */	;\
+	cmp	scr2, MINI_STACK_VAL_INCR*MINI_STACK_DEPTH		;\
+	bge,a,pn %xcc, hvabort						;\
+	  rd	%pc, %g1						;\
+	add	scr2, MINI_STACK_VAL_INCR, scr2	/* next element */	;\
+	stx	scr2, [scr1 + MINI_STACK_PTR]				;\
+	add	scr2, scr1, scr2					;\
+		/* store at previous ptr value */			;\
+	stx	val, [scr2 + MINI_STACK_VAL - MINI_STACK_VAL_INCR]
+	
+
+#define	STRAND_POP(val, scr1)						\
+	STRAND_STRUCT(scr1)						;\
+	add	scr1, STRAND_MINI_STACK, scr1				;\
+	ldx	[scr1 + MINI_STACK_PTR], val				;\
+	brlez,a,pn val, hvabort						;\
+	  rd	%pc, %g1						;\
+	sub	val, MINI_STACK_VAL_INCR, val				;\
+	stx	val, [scr1 + MINI_STACK_PTR]				;\
+	add	scr1, val, scr1						;\
+	ldx	[scr1 + MINI_STACK_VAL], val
 
 
 /*
@@ -346,11 +410,10 @@ extern "C" {
 	add	 newvalue, value, newvalue	;\
 	.poplocals
 
+
 /*
  * Locking primitives
  */
-
-
 #define	MEMBAR_ENTER \
 	/* membar #StoreLoad|#StoreStore not necessary on Niagara */
 #define	MEMBAR_EXIT \
@@ -362,13 +425,21 @@ extern "C" {
  */
 #define	SPINLOCK_ENTER(lock, scr1, scr2)				\
 	.pushlocals							;\
-	CPU_STRUCT(scr1)						;\
-	ldub	[scr1 + CPU_PID], scr2	/* my ID */			;\
+	STRAND_STRUCT(scr1)						;\
+	ldub	[scr1 + STRAND_ID], scr2	/* my ID */		;\
 	inc	scr2			/* lockID = cpuid + 1 */ 	;\
-1:	mov	scr2, scr1						;\
-	casx	[lock], %g0, scr1	/* if zero, write my lockID */	;\
-	brnz,pn	scr1, 1b						;\
+	mov	0, scr1							;\
+1:									;\
+	brz,pn	scr1, 2f						;\
 	nop								;\
+									;\
+	be,a	%xcc, hvabort						;\
+	  rd	%pc, %g1						;\
+2:									;\
+	mov	scr2, scr1						;\
+	casx	[lock], %g0, scr1	/* if zero, write my lockID */	;\
+	brnz,a,pn scr1, 1b						;\
+	  cmp	scr2, scr1						;\
 	MEMBAR_ENTER							;\
 	.poplocals
 
@@ -422,6 +493,18 @@ extern "C" {
 	sub	reg, scr, reg		/* reg = l - a */	;\
 	.poplocals
 
+#define	DELAY_SECS(scr1, scr2, SECS) 				\
+	CPU_STRUCT(scr1)					;\
+	CPU2ROOT_STRUCT(scr1, scr2)				;\
+	ldx	[scr2 + CONFIG_STICKFREQUENCY], scr2		;\
+	mulx	scr2, SECS, scr2				;\
+	rd	STICK, scr1					;\
+	add	scr1, scr2, scr1				;\
+0:								;\
+	rd	STICK, scr2					;\
+	cmp	scr2, scr1					;\
+	blu	%xcc, 0b					;\
+	nop
 
 /*
  * SMALL_COPY_MACRO - byte-wise copy a small region of memory.
@@ -441,12 +524,36 @@ extern "C" {
 	deccc	len		;\
 	stb	scr, [dest]	;\
 	bnz,pt	%xcc, 1b	;\
-	  inc	dest		;\
+	inc	dest		;\
 	.poplocals
 
+/*
+ * SMALL_ZERO_MACRO - byte-wise zero a small region of memory.
+ *
+ * Args:
+ *      addr - starting address
+ *      len - length of region to copy
+ *
+ * All arguments are clobbered.
+ */
+#define	SMALL_ZERO_MACRO(addr, len) \
+	.pushlocals		;\
+	brz,pn	len, 2f		;\
+	nop			;\
+1:	stb	%g0, [addr]	;\
+	deccc	len		;\
+	bnz,pt	%xcc, 1b	;\
+	inc	addr		;\
+2:				;\
+	.poplocals
+
+/*
+ * Cstyle macro for minimum
+ */
+#define	MIN(x, y) 			\
+        ((x) < (y) ? (x) : (y))		\
 
 /* END CSTYLED */
-
 
 #ifdef __cplusplus
 }

@@ -42,22 +42,24 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
-#ifndef _NIAGARA_ASI_H
-#define	_NIAGARA_ASI_H
+#ifndef _ASI_H
+#define	_ASI_H
 
-#pragma ident	"@(#)asi.h	1.6	05/05/18 SMI"
+#pragma ident	"@(#)asi.h	1.8	07/05/03 SMI"
 
 /*
- * Niagara ASI definitions
+ * Niagara-family ASI definitions
  */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <platform/asi.h>
 
 #define	ASI_MEM		0x14	/* Physical address, non-L1$-allocating */
 #define	ASI_IO		0x15	/* Physical address, non-$able w/ side-effect */
@@ -78,34 +80,15 @@ extern "C" {
 #define	ASI_QUAD_LDD_REAL 0x26	/* 128-bit atomic ldda/stda real */
 #define	ASI_QUAD_LDD_LE	0x2c	/* 128-bit atomic ldda/stda, little endian */
 
-#define	ASI_STREAM_MA	0x40	/* Niagara streaming extensions */
+#define	ASI_STREAM	0x40	/* Niagara streaming extensions */
 #define	ASI_NIAGARA	0x42	/* BIST/LSU diag registers */ /* XXX */
 
 #define	ASI_DC_DATA	0x46	/* D$ data array diag access */
 #define	ASI_DC_TAG	0x47	/* D$ tag array diag access */
 
-#define	ASI_SPARC_ERR_EN	0x4b	/* Sparc Error enable */
-#define	ASI_SPARC_ERR_STATUS	0x4c	/* Sparc Error status */
-#define	ASI_SPARC_ERR_ADDR	0x4d	/* Sparc Error address */
-
 #define	ASI_HSCRATCHPAD	0x4f	/* Hypervisor scratchpad registers */
 
-#define	ASI_DTSBBASE_CTX0_PS0	0x31
-#define	ASI_DTSBBASE_CTX0_PS1	0x32
-#define	ASI_DTSB_CONFIG_CTX0	0x33
-#define	ASI_ITSBBASE_CTX0_PS0	0x35
-#define	ASI_ITSBBASE_CTX0_PS1	0x36
-#define	ASI_ITSB_CONFIG_CTX0	0x37
-#define	ASI_DTSBBASE_CTXN_PS0	0x39
-#define	ASI_DTSBBASE_CTXN_PS1	0x3a
-#define	ASI_DTSB_CONFIG_CTXN	0x3b
-#define	ASI_ITSBBASE_CTXN_PS0	0x3d
-#define	ASI_ITSBBASE_CTXN_PS1	0x3e
-#define	ASI_ITSB_CONFIG_CTXN	0x3f
-
 #define	ASI_IMMU	0x50	/* IMMU registers */
-#define	ASI_IMMU_TSB_PS0 0x51	/* IMMU TSB PS0 */
-#define	ASI_IMMU_TSB_PS1 0x52	/* IMMU TSB PS1 */
 #define	ASI_ITLB_DATA_IN 0x54	/* IMMU data in register */
 #define	ASI_ITLB_DATA_ACC 0x55	/* IMMU data access register */
 #define	ASI_ITLB_TAG	0x56	/* IMMU tag read register */
@@ -115,9 +98,6 @@ extern "C" {
 
 #define	IDMMU_PARTITION_ID	0x80 /* Partition ID register */
 
-#define	ASI_DMMU_TSB_PS0 0x59	/* DMMU TSB PS0 */
-#define	ASI_DMMU_TSB_PS1 0x5a	/* DMMU TSB PS1 */
-#define	ASI_DTLB_DIRECTPTR 0x5b	/* DMMU direct pointer */
 #define	ASI_DTLB_DATA_IN 0x5c	/* DMMU data in register */
 #define	ASI_DTLB_DATA_ACC 0x5d	/* DMMU data access register */
 #define	ASI_DTLB_TAG	0x5e	/* DMMU tag read register */
@@ -150,4 +130,4 @@ extern "C" {
 }
 #endif
 
-#endif /* _NIAGARA_ASI_H */
+#endif /* _ASI_H */

@@ -42,14 +42,18 @@
 * ========== Copyright Header End ============================================
 */
 /*
- * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
 #ifndef _SVC_VBSC_H
 #define	_SVC_VBSC_H
 
-#pragma ident	"@(#)svc_vbsc.h	1.6	06/04/10 SMI"
+#pragma ident	"@(#)svc_vbsc.h	1.12	07/05/29 SMI"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #ifdef CONFIG_VBSC_SVC
 
@@ -66,9 +70,14 @@
 #define	GUEST_STATE_CMD_RESET	2
 #define	GUEST_STATE_CMD_SHUTREQ	3
 #define	GUEST_STATE_CMD_WDEXPIRE 4
+#define	GUEST_STATE_CMD_DCOREREQ 5
 
 
+#ifdef _ASM
 #define	VBSC_CMD(x, y)	((0x80 << 56) | (((x) << 8) | (y)))
+#else
+#define	VBSC_CMD(x, y)  ((uint64_t)((0x80ULL << 56) | (((x) << 8) | (y))))
+#endif /* _ASM */
 #define	VBSC_ACK(x, y)	((((x) << 8) | (y)))
 
 #define	VBSC_GUEST_OFF	VBSC_CMD(VBSC_CMD_GUEST_STATE, GUEST_STATE_CMD_OFF)
@@ -81,17 +90,28 @@
 #define	VBSC_HV_START	VBSC_CMD(VBSC_CMD_HV, 'V')
 #define	VBSC_HV_PING	VBSC_CMD(VBSC_CMD_HV, 'I')
 #define	VBSC_HV_ABORT	VBSC_CMD(VBSC_CMD_HV, 'A')
-
+#define	VBSC_HV_PLXRESET VBSC_CMD(VBSC_CMD_HV, 'P')
 /*
  * HV_GUEST_SHUTDOWN_REQ - send the guest a graceful shutdown resumable
  * error report
  *
  * word0: VBSC_HV_GUEST_SHUTDOWN_REQ
  * word1: xid
- * word1: grace period in seconds
+ * word2: grace period in seconds
  */
 #define	VBSC_HV_GUEST_SHUTDOWN_REQ	\
 	VBSC_CMD(VBSC_CMD_GUEST_STATE, GUEST_STATE_CMD_SHUTREQ)
+
+/*
+ * HV_GUEST_DCORE_REQ - send the guest a forced panic non-resumable
+ * error report
+ *
+ * word0: VBSC_HV_GUEST_DCORE_REQ
+ * word1: xid
+ */
+#define	VBSC_HV_GUEST_DCORE_REQ	\
+	VBSC_CMD(VBSC_CMD_GUEST_STATE, GUEST_STATE_CMD_DCOREREQ)
+
 
 /*
  * Debugging aids, emitted on hte vbsc HV "console" (TCP port 2001)
@@ -127,6 +147,17 @@ struct dbgerror {
 	struct dbgerror_payload payload;
 };
 
+extern void config_svcchans();
+extern void error_svc_rx();
+extern void error_svc_tx();
+extern void vbsc_rx();
+extern void vbsc_tx();
+extern int svc_intr_getstate(void *);
+
 #endif /* !_ASM */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _SVC_VBSC_H */
