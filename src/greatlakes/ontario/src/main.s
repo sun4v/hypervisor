@@ -292,6 +292,7 @@
 	PRINT_REGISTER("Strand start set", %l2)
 	PRINT_REGISTER("Total physical mem", %l3)
 
+#ifndef T1_FPGA
 #ifdef RESETCONFIG_BROKENTICK
 
 	/*
@@ -333,6 +334,7 @@
 	wrpr	%g3, %tick
 
 #endif /* RESETCONFIG_BROKENTICK */
+#endif /* ifndef T1_FPGA */
 
 	! Before we can start using C compiled PIC code
 	! we have to adjust the GLOBAL_OFFSET_TABLE
@@ -351,11 +353,13 @@
 	blt,pt	%xcc, 1b
 	  nop
 
+#ifndef T1_FPGA
 	PRINT("setup iob\r\n");
 	HVCALL(setup_iob)
 
 	PRINT("setup jbi\r\n");
 	HVCALL(setup_jbi)
+#endif /* ifndef T1_FPGA */
 
 #ifdef CONFIG_VBSC_SVC
 	PRINT("Sending HV start message to vbsc\r\n")
@@ -422,6 +426,9 @@
 #endif /* CONFIG_SVC */
 
 	PRINT("Setting remaining details\r\n")
+
+#ifndef T1_FPGA
+
 	/*
 	 * Setup the Error Steer & Start the Polling Daemon:
 	 */
@@ -441,6 +448,7 @@
 	 */
 	PRINT("Start error poll daemon\r\n")
 	HVCALL(err_poll_daemon_start)			! start the daemon
+#endif /* ifndef T1_FPGA */
 
 	/*
 	 * FIXME: Start heartbeat for the control domain.
@@ -457,6 +465,7 @@
 
 	DEBUG_SPINLOCK_ENTER(%g1, %g2, %g3)
 
+#ifndef T1_FPGA
 	/*
 	 * Ensure all zero'd memory is flushed from the l2$
 	 */
@@ -470,6 +479,7 @@
 	
 	PRINT_NOTRAP("Clear error status registers\r\n");
 	HVCALL(clear_error_status_registers)
+#endif /* ifndef T1_FPGA */
 
 /*
  * XXXLDOMS: - Disabled due to intermittent INTACK TIMEOUT
@@ -567,6 +577,7 @@
 
 	STRAND_POP(%g4, %g3)	! restore %g4 = &config
 
+#ifndef T1_FPGA
 #ifdef RESETCONFIG_BROKENTICK
 
 	/*
@@ -596,9 +607,10 @@
 	wrpr	%g3, %tick
 
 #endif /* RESETCONFIG_BROKENTICK */
+#endif /* ifndef T1_FPGA */
 
 	/* Slave now does its bit of the memory scrubbing */
-#ifdef CONFIG_FPGA
+#if  defined(CONFIG_FPGA) || defined(T1_FPGA)
 	STRAND_STRUCT(%g1)
 	set	STRAND_SCRUB_SIZE, %g3
 	ldx	[%g1 + %g3], %g2
@@ -619,9 +631,11 @@
 	cmp	%g2, %g3
 	bne,pt	%xcc, 1b
 	  nop
-#endif
+#endif /* if  defined(CONFIG_FPGA) || defined(T1_FPGA) */
 
+#ifndef T1_FPGA
 	HVCALL(clear_error_status_registers)
+#endif /* ifndef T1_FPGA */
 
 	ba,a,pt	%xcc, start_work
 	  nop
@@ -1473,7 +1487,7 @@ bus_failed:
 	ldx	[%i0 + CONFIG_STRAND_STARTSET], %l2
 	ldx	[%i0 + CONFIG_PHYSMEMSIZE], %l3
 
-#ifdef CONFIG_FPGA
+#if  defined(CONFIG_FPGA) || defined(T1_FPGA)
 	! How many functional strands do we have available?
 	mov	%l2, %o7
 	mov	1, %o1
@@ -1551,7 +1565,7 @@ bus_failed:
 
 	! strand bits get cleared as their scrub is completed
 	stx	%o7, [ %i0 + CONFIG_SCRUB_SYNC ]
-#endif	/* CONFIG_FPGA */
+#endif /* if  defined(CONFIG_FPGA) || defined(T1_FPGA) */
 
 	/*
 	 * Start all the other strands. They will scrub their slice of memory
@@ -1572,8 +1586,15 @@ bus_failed:
 	sllx	%g3, %g1, %g3
 	btst	%g2, %g3
 	bz,pn	%xcc, 2f
+#ifdef T1_FPGA
+/* Send poweron reset to other strands. */
+	mov	INT_VEC_DIS_TYPE_RESET, %g4
+	sllx	%g4, INT_VEC_DIS_TYPE_SHIFT, %g4
+	or      %g4, INT_VEC_DIS_VECTOR_RESET, %g4
+#else
 	mov	INT_VEC_DIS_TYPE_RESUME, %g4
 	sllx	%g4, INT_VEC_DIS_TYPE_SHIFT, %g4
+#endif
 	sllx	%g1, INT_VEC_DIS_VCID_SHIFT, %g3	! target strand
 	or	%g4, %g3, %g3				! int_vec_dis value
 	stx	%g3, [%g5]
@@ -1585,7 +1606,7 @@ bus_failed:
 	/* 
 	 * Master now does its bit of the memory scrubbing.
 	 */
-#ifdef CONFIG_FPGA
+#if  defined(CONFIG_FPGA) || defined(T1_FPGA) 
 	clr	%g1
 	mov	%l0, %g2	! %g2 = membase
 	HVCALL(memscrub)	! scrub below hypervisor
@@ -1596,6 +1617,22 @@ bus_failed:
 	HVCALL(memscrub)	! scrub masters slice above hypervisor
 
 	! Now wait until all the other strands are done
+#ifdef T1_FPGA
+	mov  0, %o1
+	set  0xFFFFFF, %o2
+1:
+	ldx [ %i0 + CONFIG_SCRUB_SYNC ], %g2
+	inc   %o1
+	andcc %o1, %o2, %g0
+	bne,pt %xcc, 3f
+	nop
+	PRINT(" ")
+ 	PRINTX(%g2)
+3:
+	brnz,pt	%g2, 1b
+	nop
+	PRINT(" done\r\n")
+#else /* ifdef T1_FPGA */
 1:
 	ldx [ %i0 + CONFIG_SCRUB_SYNC ], %g2
 	PRINT(" ")
@@ -1603,7 +1640,8 @@ bus_failed:
 	brnz,pt	%g2, 1b
 	nop
 	PRINT(" done\r\n")
-#endif
+#endif /* ifdef T1_FPGA */
+#endif /* if  defined(CONFIG_FPGA) || defined(T1_FPGA) */
 
 	mov	%l7, %g7	! restore return address
 	HVRET

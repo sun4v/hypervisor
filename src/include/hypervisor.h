@@ -238,6 +238,11 @@ extern "C" {
 #define	DISK_WRITE		0xf1
 #endif
 
+#ifdef T1_FPGA_SNET
+#define	SNET_READ		0xf2
+#define	SNET_WRITE		0xf3
+#endif
+
 #ifdef DEBUG /* Not yet FWARCd */
 #define	MMU_PERM_ADDR_INFO	0xfd
 #endif

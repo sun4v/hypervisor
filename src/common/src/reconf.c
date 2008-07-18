@@ -1137,6 +1137,9 @@ config_a_guest(bin_md_t *mdp, md_element_t *guest_nodep)
 	uint64_t	guest_id, ino, base_memsize;
 	guest_t		*guestp;
 	int		x;
+	md_element_t	*snet_nodep;
+	uint64_t	snet_ino;
+	uint64_t	snet_pa;
 	md_element_t	*devices_nodep;
 	md_element_t	*mblock_nodep;
 	md_element_t	*services_nodep;
@@ -1407,6 +1410,25 @@ config_a_guest(bin_md_t *mdp, md_element_t *guest_nodep)
 	} else {
 		c_hvabort();
 	}
+
+#ifdef	T1_FPGA_SNET
+	if (NULL != md_find_node_by_arc(mdp, guest_nodep, MDARC(MDNAME(fwd)),
+	    MDNODE(MDNAME(snet)), &snet_nodep)) {
+		if (!md_node_get_val(mdp, snet_nodep, MDNAME(snet_ino),
+		    &snet_ino)) {
+			DBG(c_printf("Missing ino in snet node\n"));
+			c_hvabort();
+		}
+		if (!md_node_get_val(mdp, snet_nodep, MDNAME(snet_pa),
+		    &snet_pa)) {
+			DBG(c_printf("Missing pa in snet node\n"));
+			c_hvabort();
+		}
+                config_a_guest_device_vino(guestp, snet_ino, DEVOPS_VDEV);
+		guestp->snet.ino = snet_ino;
+		guestp->snet.pa = snet_pa;
+	}
+#endif /* ifdef	T1_FPGA_SNET */
 
 
 #ifdef	CONFIG_SVC

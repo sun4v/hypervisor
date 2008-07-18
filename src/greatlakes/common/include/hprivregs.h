@@ -168,6 +168,7 @@ extern "C" {
 #define	INT_VEC_DIS_TYPE_RESET	0x1
 #define	INT_VEC_DIS_TYPE_IDLE	0x2
 #define	INT_VEC_DIS_TYPE_RESUME	0x3
+#define	INT_VEC_DIS_VECTOR_RESET  0x1
 
 /* BEGIN CSTYLED */
 /*

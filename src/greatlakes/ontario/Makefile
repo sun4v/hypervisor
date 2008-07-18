@@ -48,7 +48,7 @@
 
 TOP = ../..
 
-SUBDIRS = legion release debug
+SUBDIRS = legion release debug t1_fpga
 
 include $(TOP)/Makefile.master
 

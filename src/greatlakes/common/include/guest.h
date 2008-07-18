@@ -61,6 +61,11 @@ extern "C" {
 #ifdef CONFIG_DISK
 #include <vdev_simdisk.h>
 #endif /* CONFIG_DISK */
+
+#ifdef T1_FPGA_SNET
+#include <vdev_snet.h>
+#endif
+
 #include <ldc.h>
 #include <hvctl.h>
 #include <platform/guest.h>
@@ -342,6 +347,13 @@ struct guest {
 	 * Simulated disk
 	 */
 	struct hvdisk	disk;
+#endif
+
+#ifdef T1_FPGA_SNET
+	/*
+	 * Simulated/Simple network
+	 */
+	struct snet_info   snet;
 #endif
 
 	/*

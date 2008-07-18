@@ -85,6 +85,10 @@ typedef struct {
 #ifdef	CONFIG_DISK
 	uint64_t	diskpa;
 #endif
+#ifdef	T1_FPGA_SNET
+	uint64_t	snet_pa;
+	uint64_t	snet_ino;
+#endif
 	uint64_t	reset_reason;
 	uint64_t	perfreg_accessible;
 	uint64_t	diagpriv;

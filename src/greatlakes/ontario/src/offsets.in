@@ -78,6 +78,7 @@
 #include <md.h>
 #include <md/md_impl.h>
 #include <vdev_simdisk.h>
+#include <vdev_snet.h>
 
 nametable	NAMETABLE_SIZE
 
@@ -649,6 +650,10 @@ hvdisk HVDISK_SIZE
 	pa		DISK_PA
 	size		DISK_SIZE
 
+snet_info SNET_INFO_SIZE
+	pa		SNET_PA
+	ino		SNET_INO
+
 ldc_endpoint	LDC_ENDPOINT_SIZE
 	is_live		LDC_IS_LIVE
 	is_private	LDC_IS_PRIVATE
@@ -812,6 +817,7 @@ guest	GUEST_SIZE
         diagpriv        GUEST_DIAGPRIV
         reset_reason    GUEST_RESET_REASON
 	disk		GUEST_DISK
+	snet		GUEST_SNET
 	watchdog	GUEST_WATCHDOG
 	ldc_mapin_free_idx	GUEST_LDC_MAPIN_FREE_IDX
 	ldc_mapin_basera	GUEST_LDC_MAPIN_BASERA

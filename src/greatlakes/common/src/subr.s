@@ -81,7 +81,8 @@
  * than the specifically stored value.
  */
 	ENTRY_NP(memscrub)
-#ifdef CONFIG_FPGA /* running on real hardware */
+#if defined(CONFIG_FPGA) || defined(T1_FPGA) /* running on real hardware */
+#ifndef T1_FPGA_MEMORY_PREINIT
 	brz	%g2, 2f
 	add	%g1, %g2, %g2
 	mov	ASI_BLK_INIT_P, %asi
@@ -101,7 +102,8 @@
 	nop
 2:	
 	membar	#Sync
-#endif
+#endif /* ifndef T1_FPGA_MEMORY_PREINIT */
+#endif /* if defined(CONFIG_FPGA) || defined(T1_FPGA) */
 	jmp	%g7 + 4
 	nop
 	SET_SIZE(memscrub)

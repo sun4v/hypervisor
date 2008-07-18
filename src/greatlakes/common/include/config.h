@@ -165,6 +165,11 @@ struct nametable {
 	uint64_t	hdname_cfghandle;
 	uint64_t	hdname_cfgbase;
 	uint64_t	hdname_diskpa;
+#ifdef T1_FPGA_SNET
+	uint64_t	hdname_snet;
+	uint64_t	hdname_snet_pa;
+	uint64_t	hdname_snet_ino;
+#endif
 	uint64_t	hdname_diagpriv;
 	uint64_t	hdname_debugprintflags;
 	uint64_t	hdname_iobase;
